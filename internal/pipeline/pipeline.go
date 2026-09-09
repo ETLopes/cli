@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,11 +32,12 @@ const (
 	StageDownload Stage = "Downloading"
 	StageSeparate Stage = "Separating"
 	StageRender   Stage = "Rendering"
+	StageEncode   Stage = "Encoding"
 	StageExport   Stage = "Exporting"
 )
 
 // Stages lists the pipeline's phases in execution order.
-var Stages = []Stage{StageInspect, StageDownload, StageSeparate, StageRender, StageExport}
+var Stages = []Stage{StageInspect, StageDownload, StageSeparate, StageRender, StageEncode, StageExport}
 
 // Event reports pipeline progress. Fraction is within the current stage.
 type Event struct {
@@ -70,8 +72,10 @@ type Output struct {
 	// Instrument is the stem a minus-one or stem output relates to. Empty for
 	// KindFull.
 	Instrument string
-	Path       string
-	Bytes      int64
+	// Encoding is the audio.Encoding ID this file was written in.
+	Encoding string
+	Path     string
+	Bytes    int64
 }
 
 // Name is the output's file name.
@@ -90,6 +94,9 @@ type Request struct {
 	// Normalize and Limit control post-processing of rendered mixes.
 	Normalize bool
 	Limit     bool
+	// Formats lists the audio.Encoding IDs to produce. WAV is always included
+	// regardless, since it is the only format the module plays.
+	Formats []string
 	// USBPath, when set, is the mount point of a USB drive to copy the
 	// finished files onto. Files land in the root, as the module requires.
 	USBPath string
@@ -111,6 +118,51 @@ type Result struct {
 	// Exported is the USB destination when files were copied there.
 	Exported string
 	Elapsed  time.Duration
+}
+
+// EncodingSummary rolls up what was produced in one format.
+type EncodingSummary struct {
+	Encoding audio.Encoding
+	Dir      string
+	Count    int
+	Bytes    int64
+}
+
+// ByEncoding groups the outputs by format, in registry order. The summary
+// prints this rather than one line per file: with five formats that would be
+// forty-five lines, and the per-format totals are what a user actually needs
+// to decide what to send.
+func (r Result) ByEncoding() []EncodingSummary {
+	index := map[string]int{}
+	var out []EncodingSummary
+	for _, o := range r.Outputs {
+		enc, ok := audio.LookupEncoding(o.Encoding)
+		if !ok {
+			continue
+		}
+		i, seen := index[o.Encoding]
+		if !seen {
+			out = append(out, EncodingSummary{Encoding: enc, Dir: enc.Dir})
+			i = len(out) - 1
+			index[o.Encoding] = i
+		}
+		out[i].Count++
+		out[i].Bytes += o.Bytes
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return encodingOrder(out[i].Encoding.ID) < encodingOrder(out[j].Encoding.ID)
+	})
+	return out
+}
+
+// encodingOrder gives the registry's presentation order for an encoding ID.
+func encodingOrder(id string) int {
+	for i, e := range audio.Encodings() {
+		if e.ID == id {
+			return i
+		}
+	}
+	return len(audio.Encodings())
 }
 
 // TotalBytes is the combined size of every produced file.
@@ -138,6 +190,14 @@ func (p *Pipeline) Run(ctx context.Context, req Request, observe Observer) (*Res
 		if observe != nil {
 			observe(e)
 		}
+	}
+
+	// Resolve formats up front. This is pure input validation, so it must
+	// happen before the download and separation: a typo in --formats should
+	// cost a moment, not the minutes those stages take.
+	encodings, err := audio.ResolveEncodings(req.Formats)
+	if err != nil {
+		return nil, err
 	}
 
 	p.YouTube.CookiesFromBrowser = req.CookiesFromBrowser
@@ -217,10 +277,22 @@ func (p *Pipeline) Run(ctx context.Context, req Request, observe Observer) (*Res
 	result.Outputs = outputs
 	emit(Event{Stage: StageRender, Detail: fmt.Sprintf("%d files", len(outputs)), Fraction: 1, Done: true})
 
-	// Stage 5: optional copy to the module's USB drive.
+	// Stage 5: derive the shareable copies from the rendered WAVs.
+	encoded, err := p.encode(ctx, outputs, encodings, result.Dir, duration, emit)
+	if err != nil {
+		return nil, err
+	}
+	result.Outputs = append(result.Outputs, encoded...)
+	if len(encoded) > 0 {
+		emit(Event{Stage: StageEncode, Detail: fmt.Sprintf("%d files", len(encoded)), Fraction: 1, Done: true})
+	} else {
+		emit(Event{Stage: StageEncode, Detail: "WAV only", Fraction: 1, Done: true})
+	}
+
+	// Stage 6: optional copy to the module's USB drive.
 	if req.USBPath != "" {
 		emit(Event{Stage: StageExport, Detail: req.USBPath, Fraction: 0})
-		warns, err := exportToUSB(outputs, req.USBPath, func(f float64) {
+		warns, err := exportToUSB(result.Outputs, req.USBPath, func(f float64) {
 			emit(Event{Stage: StageExport, Detail: req.USBPath, Fraction: f})
 		})
 		if err != nil {
@@ -316,13 +388,60 @@ func (p *Pipeline) render(ctx context.Context, job renderJob, emit func(Event)) 
 			return nil, err
 		}
 
-		out := Output{Kind: t.kind, Instrument: t.instrument, Path: dst}
+		out := Output{Kind: t.kind, Instrument: t.instrument, Encoding: audio.EncodingWAV, Path: dst}
 		if info, statErr := os.Stat(dst); statErr == nil {
 			out.Bytes = info.Size()
 		}
 		outputs = append(outputs, out)
 	}
 	return outputs, nil
+}
+
+// encode derives the shareable copies from the rendered module WAVs. Encoding
+// from the finished WAV rather than re-mixing from stems guarantees every
+// format carries byte-identical source audio, differing only in codec.
+func (p *Pipeline) encode(ctx context.Context, wavs []Output, encodings []audio.Encoding, dir string, duration time.Duration, emit func(Event)) ([]Output, error) {
+	var lossy []audio.Encoding
+	for _, e := range encodings {
+		if e.ID != audio.EncodingWAV {
+			lossy = append(lossy, e)
+		}
+	}
+	if len(lossy) == 0 || len(wavs) == 0 {
+		return nil, nil
+	}
+
+	total := len(lossy) * len(wavs)
+	out := make([]Output, 0, total)
+	done := 0
+
+	for _, enc := range lossy {
+		for _, w := range wavs {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			name := enc.Filename(filepath.Base(w.Path))
+			dst := filepath.Join(dir, enc.Dir, name)
+
+			base := float64(done) / float64(total)
+			span := 1 / float64(total)
+			onProgress := func(f float64) {
+				emit(Event{Stage: StageEncode, Detail: enc.ID + "/" + name, Fraction: base + f*span})
+			}
+
+			if err := p.Audio.Encode(ctx, w.Path, dst, enc, duration, onProgress); err != nil {
+				return nil, err
+			}
+
+			o := Output{Kind: w.Kind, Instrument: w.Instrument, Encoding: enc.ID, Path: dst}
+			if info, statErr := os.Stat(dst); statErr == nil {
+				o.Bytes = info.Size()
+			}
+			out = append(out, o)
+			done++
+		}
+	}
+	return out, nil
 }
 
 // pathsExcluding returns every stem path except the named one.
@@ -362,21 +481,33 @@ func exportToUSB(outputs []Output, dest string, onProgress func(float64)) ([]str
 		return nil, fmt.Errorf("USB destination %s is not a directory", dest)
 	}
 
+	// The module plays WAV only, so the shareable copies stay off the drive.
+	// Copying them would waste space and clutter the module's file list.
+	var playable []Output
+	for _, o := range outputs {
+		if o.Encoding == audio.EncodingWAV {
+			playable = append(playable, o)
+		}
+	}
+	if len(playable) == 0 {
+		return nil, nil
+	}
+
 	var warnings []string
 	if existing, err := filepath.Glob(filepath.Join(dest, "*.wav")); err == nil {
-		if total := len(existing) + len(outputs); total > dtxspec.MaxWavFiles {
+		if total := len(existing) + len(playable); total > dtxspec.MaxWavFiles {
 			warnings = append(warnings, fmt.Sprintf(
 				"drive would hold %d .wav files; the module only lists %d",
 				total, dtxspec.MaxWavFiles))
 		}
 	}
 
-	for i, o := range outputs {
+	for i, o := range playable {
 		if err := copyFile(o.Path, filepath.Join(dest, o.Name())); err != nil {
 			return warnings, err
 		}
 		if onProgress != nil {
-			onProgress(float64(i+1) / float64(len(outputs)))
+			onProgress(float64(i+1) / float64(len(playable)))
 		}
 	}
 	return warnings, nil

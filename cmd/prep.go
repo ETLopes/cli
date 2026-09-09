@@ -32,6 +32,7 @@ func registerPrepFlags(fs *pflag.FlagSet) {
 	fs.Int("jobs", d.Jobs, "parallel Demucs workers (0 lets Demucs decide)")
 	fs.Bool("normalize", d.Normalize, "loudness-normalize rendered mixes to -14 LUFS")
 	fs.Bool("limit", d.Limit, "apply a brickwall limiter to avoid clipping")
+	fs.StringSlice("formats", d.Formats, "extra formats to produce for sharing ("+strings.Join(audio.EncodingIDs(), ", ")+"); wav is always included")
 	fs.String("usb", d.USBPath, "copy finished files to this drive's root directory")
 	fs.String("cookies-from-browser", d.CookiesFromBrowser, "borrow cookies from a browser for restricted videos")
 }
@@ -66,6 +67,7 @@ func runPrep(ctx context.Context, e *env, args []string) error {
 		Jobs:               e.cfg.Jobs,
 		Normalize:          e.cfg.Normalize,
 		Limit:              e.cfg.Limit,
+		Formats:            e.cfg.Formats,
 		USBPath:            e.cfg.USBPath,
 		CookiesFromBrowser: e.cfg.CookiesFromBrowser,
 	}
@@ -131,6 +133,24 @@ func wizard(ctx context.Context, req *pipeline.Request) error {
 		huh.NewOption("Six stems - adds guitar and piano, experimental", separate.ModelSixStem),
 	}
 
+	// WAV is listed and pre-selected because it is what the module plays, but
+	// it is produced regardless of what is ticked here.
+	selected := make(map[string]bool, len(req.Formats))
+	for _, f := range req.Formats {
+		selected[f] = true
+	}
+	selected[audio.EncodingWAV] = true
+
+	var formatOptions []huh.Option[string]
+	for _, enc := range audio.Encodings() {
+		label := enc.Label
+		if enc.Note != "" {
+			label += " — " + enc.Note
+		}
+		formatOptions = append(formatOptions,
+			huh.NewOption(label, enc.ID).Selected(selected[enc.ID]))
+	}
+
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().
@@ -143,6 +163,11 @@ func wizard(ctx context.Context, req *pipeline.Request) error {
 				Description("Every model produces a minus-one mix per stem.").
 				Options(modelOptions...).
 				Value(&req.Model),
+			huh.NewMultiSelect[string]().
+				Title("Formats").
+				Description("Each format gets its own folder. WAV is always produced.").
+				Options(formatOptions...).
+				Value(&req.Formats),
 		),
 	)
 	if err := form.RunWithContext(ctx); err != nil {
@@ -173,19 +198,24 @@ func validateURL(raw string) error {
 
 // printSummary reports what was produced, leading with the file the user is
 // most likely to want: the mix with the drums taken out.
+//
+// Only the module WAVs are listed individually. Every format contains the same
+// nine tracks, so listing all of them would run to dozens of near-identical
+// lines; the per-format rollup carries what actually differs, which is size.
 func printSummary(r *pipeline.Result) {
 	ui.Println()
 	ui.Println(ui.Success(ui.Heading.Render("Ready for the module")) +
 		ui.Muted.Render(fmt.Sprintf("  %d files · %s · %s",
 			len(r.Outputs), ui.HumanBytes(r.TotalBytes()), formatDuration(r.Elapsed))))
 	ui.Println()
-	ui.Println(ui.KeyValue("Track", r.Info.Title, 10))
-	ui.Println(ui.KeyValue("Folder", r.DTXDir, 10))
-	ui.Println(ui.KeyValue("Format", dtxspec.FormatDescription(), 10))
+	ui.Println(ui.KeyValue("Track", r.Info.Title, 8))
+	ui.Println(ui.KeyValue("Folder", r.Dir, 8))
+	ui.Println(ui.KeyValue("Module", dtxspec.FormatDescription(), 8))
 	ui.Println()
 
+	wavs := outputsFor(r, audio.EncodingWAV)
 	nameWidth := 4
-	for _, o := range r.Outputs {
+	for _, o := range wavs {
 		if n := len(o.Name()); n > nameWidth {
 			nameWidth = n
 		}
@@ -194,14 +224,13 @@ func printSummary(r *pipeline.Result) {
 	for _, group := range []struct {
 		heading string
 		kind    pipeline.Kind
-		note    string
 	}{
-		{"Play along (instrument removed)", pipeline.KindMinusOne, "you play this part"},
-		{"Full mix", pipeline.KindFull, ""},
-		{"Isolated stems", pipeline.KindStem, ""},
+		{"Play along (instrument removed)", pipeline.KindMinusOne},
+		{"Full mix", pipeline.KindFull},
+		{"Isolated stems", pipeline.KindStem},
 	} {
 		var rows []pipeline.Output
-		for _, o := range r.Outputs {
+		for _, o := range wavs {
 			if o.Kind == group.kind {
 				rows = append(rows, o)
 			}
@@ -213,7 +242,7 @@ func printSummary(r *pipeline.Result) {
 		for _, o := range rows {
 			line := "    " + ui.Pad(o.Name(), nameWidth) + "  " +
 				ui.Muted.Render(ui.Pad(ui.HumanBytes(o.Bytes), 9))
-			if o.Instrument != "" && group.kind == pipeline.KindMinusOne {
+			if group.kind == pipeline.KindMinusOne && o.Instrument != "" {
 				line += ui.Muted.Render("no " + o.Instrument)
 			}
 			ui.Println(line)
@@ -221,14 +250,57 @@ func printSummary(r *pipeline.Result) {
 		ui.Println()
 	}
 
+	printFormats(r)
+
 	for _, w := range r.Warnings {
 		ui.Println(ui.Warning(w))
 	}
 	if r.Exported != "" {
-		ui.Println(ui.Success("copied to " + r.Exported))
-	} else {
-		ui.Println(ui.Muted.Render("  Copy these to the root of a USB stick (not a folder) for the module to see them."))
+		ui.Println(ui.Success("copied the WAVs to " + r.Exported))
 	}
+}
+
+// printFormats renders the per-format rollup.
+func printFormats(r *pipeline.Result) {
+	groups := r.ByEncoding()
+	if len(groups) <= 1 {
+		ui.Println(ui.Muted.Render("  Copy these to the root of a USB stick (not a folder) for the module to see them."))
+		return
+	}
+
+	dirWidth, labelWidth := 4, 4
+	for _, g := range groups {
+		if n := len(g.Dir + "/"); n > dirWidth {
+			dirWidth = n
+		}
+		if n := len(g.Encoding.Label); n > labelWidth {
+			labelWidth = n
+		}
+	}
+
+	ui.Println("  " + ui.Heading.Render("Formats"))
+	for _, g := range groups {
+		line := "    " + ui.Accent.Render(ui.Pad(g.Dir+"/", dirWidth)) + "  " +
+			ui.Pad(g.Encoding.Label, labelWidth) + "  " +
+			ui.Muted.Render(fmt.Sprintf("%2d files  %9s", g.Count, ui.HumanBytes(g.Bytes)))
+		if g.Encoding.ID == audio.EncodingWAV {
+			line += "  " + ui.Muted.Render("← copy to USB root")
+		}
+		ui.Println(line)
+	}
+	ui.Println()
+	ui.Println(ui.Muted.Render("  Only the dtx/ WAVs play on the module; the rest are for sharing."))
+}
+
+// outputsFor returns the outputs written in one encoding.
+func outputsFor(r *pipeline.Result, encoding string) []pipeline.Output {
+	var out []pipeline.Output
+	for _, o := range r.Outputs {
+		if o.Encoding == encoding {
+			out = append(out, o)
+		}
+	}
+	return out
 }
 
 func formatDuration(d time.Duration) string {

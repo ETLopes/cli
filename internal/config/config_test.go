@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/viper"
 
+	"github.com/eduardolopes/dtx/internal/audio"
 	"github.com/eduardolopes/dtx/internal/separate"
 )
 
@@ -184,5 +185,53 @@ func TestValidateNamesTheSettingNotTheGoField(t *testing.T) {
 	// Users edit "cookies_from_browser", not "CookiesFromBrowser".
 	if !strings.Contains(err.Error(), "cookies_from_browser") {
 		t.Errorf("error = %q, want it to name the config key", err)
+	}
+}
+
+func TestFormatsDefaultAndOverride(t *testing.T) {
+	v := newViper(t)
+	cfg, err := Load(v)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// FLAC is the safe default extra: the only lossless option, half the size.
+	if len(cfg.Formats) != 1 || cfg.Formats[0] != audio.EncodingFLAC {
+		t.Errorf("default Formats = %v, want [%s]", cfg.Formats, audio.EncodingFLAC)
+	}
+
+	v2 := newViper(t)
+	writeConfig(t, "formats:\n  - opus\n  - mp3\n")
+	cfg2, err := Load(v2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Join(cfg2.Formats, ",") != "opus,mp3" {
+		t.Errorf("Formats = %v, want [opus mp3]", cfg2.Formats)
+	}
+}
+
+func TestFormatsRejectsUnknownValue(t *testing.T) {
+	v := newViper(t)
+	writeConfig(t, "formats:\n  - flac\n  - wma\n")
+
+	_, err := Load(v)
+	if err == nil {
+		t.Fatal("expected an unknown format to be rejected")
+	}
+	if !strings.Contains(err.Error(), "wma") {
+		t.Errorf("error = %q, want it to name the offending value", err)
+	}
+	if !strings.Contains(err.Error(), "formats") {
+		t.Errorf("error = %q, want it to name the setting", err)
+	}
+}
+
+func TestEveryKnownFormatValidates(t *testing.T) {
+	for _, id := range audio.EncodingIDs() {
+		cfg := Defaults()
+		cfg.Formats = []string{id}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("format %q should be valid, got: %v", id, err)
+		}
 	}
 }

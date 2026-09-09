@@ -446,3 +446,177 @@ func containsString(hay []string, needle string) bool {
 	}
 	return false
 }
+
+// --- multi-format output ---
+
+func TestExtraFormatsLandInTheirOwnFolders(t *testing.T) {
+	dir := t.TempDir()
+	f := newFake(t, defaultStems)
+	res := runPipeline(t, f, Request{
+		OutputDir: dir,
+		Formats:   []string{audio.EncodingFLAC, audio.EncodingOpus},
+	})
+
+	tracks := 1 + len(defaultStems)*2
+	// WAV plus the two requested formats, every track in each.
+	if want := tracks * 3; len(res.Outputs) != want {
+		t.Fatalf("got %d outputs, want %d", len(res.Outputs), want)
+	}
+
+	for _, id := range []string{audio.EncodingWAV, audio.EncodingFLAC, audio.EncodingOpus} {
+		enc, _ := audio.LookupEncoding(id)
+		var seen int
+		for _, o := range res.Outputs {
+			if o.Encoding != id {
+				continue
+			}
+			seen++
+			if got := filepath.Base(filepath.Dir(o.Path)); got != enc.Dir {
+				t.Errorf("%s written to %q, want folder %q", o.Name(), got, enc.Dir)
+			}
+			if ext := filepath.Ext(o.Path); ext != "."+enc.Extension {
+				t.Errorf("%s has extension %q, want %q", o.Name(), ext, "."+enc.Extension)
+			}
+			if _, err := os.Stat(o.Path); err != nil {
+				t.Errorf("%s was not written: %v", o.Path, err)
+			}
+		}
+		if seen != tracks {
+			t.Errorf("encoding %s produced %d files, want %d", id, seen, tracks)
+		}
+	}
+}
+
+// The compressed copies must carry the same audio as the WAVs, so they are
+// derived from the rendered WAV rather than re-mixed from stems.
+func TestExtraFormatsAreEncodedFromTheRenderedWAV(t *testing.T) {
+	dir := t.TempDir()
+	f := newFake(t, defaultStems)
+	res := runPipeline(t, f, Request{OutputDir: dir, Formats: []string{audio.EncodingMP3}})
+
+	wavPaths := map[string]bool{}
+	for _, o := range res.Outputs {
+		if o.Encoding == audio.EncodingWAV {
+			wavPaths[o.Path] = true
+		}
+	}
+
+	var checked int
+	for _, c := range f.CallsTo("ffmpeg") {
+		dst := lastArg(c)
+		if filepath.Ext(dst) != ".mp3" {
+			continue
+		}
+		checked++
+		inputs := inputPaths(c)
+		if len(inputs) != 1 || !wavPaths[inputs[0]] {
+			t.Errorf("%s encoded from %v, want a single rendered WAV", filepath.Base(dst), inputs)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("expected mp3 encode calls")
+	}
+}
+
+func TestUnknownFormatFailsBeforeAnyWork(t *testing.T) {
+	dir := t.TempDir()
+	f := newFake(t, defaultStems)
+	_, err := newPipeline(f).Run(context.Background(), Request{
+		URL: "https://youtu.be/" + testID, OutputDir: dir, Formats: []string{"wma"},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected an unknown format to be rejected")
+	}
+	// Separation is the expensive stage; it must not run for a typo.
+	if got := len(f.CallsTo("demucs")); got != 0 {
+		t.Errorf("ran demucs %d times despite an invalid format", got)
+	}
+}
+
+// The module plays WAV only, so shareable copies must stay off the drive.
+func TestExportSendsOnlyWAVToUSB(t *testing.T) {
+	dir := t.TempDir()
+	usb := t.TempDir()
+	f := newFake(t, defaultStems)
+	res := runPipeline(t, f, Request{
+		OutputDir: dir, USBPath: usb,
+		Formats: []string{audio.EncodingFLAC, audio.EncodingMP3},
+	})
+
+	entries, err := os.ReadDir(usb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := 1 + len(defaultStems)*2; len(entries) != want {
+		t.Errorf("copied %d files to the drive, want %d (WAV only)", len(entries), want)
+	}
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) != ".wav" {
+			t.Errorf("%s was copied to the drive, but the module only plays WAV", e.Name())
+		}
+	}
+
+	// The other formats must still exist locally.
+	var flac int
+	for _, o := range res.Outputs {
+		if o.Encoding == audio.EncodingFLAC {
+			flac++
+		}
+	}
+	if flac == 0 {
+		t.Error("FLAC files should still be produced locally")
+	}
+}
+
+func TestByEncodingRollsUpPerFormat(t *testing.T) {
+	dir := t.TempDir()
+	f := newFake(t, defaultStems)
+	res := runPipeline(t, f, Request{
+		OutputDir: dir,
+		Formats:   []string{audio.EncodingMP3, audio.EncodingFLAC},
+	})
+
+	groups := res.ByEncoding()
+	if len(groups) != 3 {
+		t.Fatalf("got %d format groups, want 3", len(groups))
+	}
+	// Registry order, regardless of the order they were requested in.
+	want := []string{audio.EncodingWAV, audio.EncodingFLAC, audio.EncodingMP3}
+	for i, g := range groups {
+		if g.Encoding.ID != want[i] {
+			t.Errorf("group %d is %q, want %q", i, g.Encoding.ID, want[i])
+		}
+		if g.Count != 1+len(defaultStems)*2 {
+			t.Errorf("group %q has %d files, want %d", g.Encoding.ID, g.Count, 1+len(defaultStems)*2)
+		}
+		if g.Bytes <= 0 {
+			t.Errorf("group %q reports %d bytes", g.Encoding.ID, g.Bytes)
+		}
+	}
+}
+
+func TestEncodeStageReportsCompletion(t *testing.T) {
+	dir := t.TempDir()
+	f := newFake(t, defaultStems)
+
+	gate := make(chan struct{}, 1)
+	gate <- struct{}{}
+	completed := map[Stage]bool{}
+	observe := func(e Event) {
+		<-gate
+		if e.Done {
+			completed[e.Stage] = true
+		}
+		gate <- struct{}{}
+	}
+
+	if _, err := newPipeline(f).Run(context.Background(), Request{
+		URL: "https://youtu.be/" + testID, OutputDir: dir,
+		Formats: []string{audio.EncodingOpus},
+	}, observe); err != nil {
+		t.Fatalf("pipeline failed: %v", err)
+	}
+	if !completed[StageEncode] {
+		t.Error("the encoding stage never reported completion")
+	}
+}

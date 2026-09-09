@@ -13,6 +13,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/spf13/viper"
 
+	"github.com/eduardolopes/dtx/internal/audio"
 	"github.com/eduardolopes/dtx/internal/separate"
 )
 
@@ -39,6 +40,9 @@ type Config struct {
 	Normalize bool `mapstructure:"normalize" yaml:"normalize"`
 	// Limit applies a brickwall limiter to rendered mixes.
 	Limit bool `mapstructure:"limit" yaml:"limit"`
+	// Formats lists the extra audio formats to produce alongside the module
+	// WAVs, for sharing with people who do not want half a gigabyte of WAV.
+	Formats []string `mapstructure:"formats" yaml:"formats" validate:"dive,audioformat"`
 	// USBPath is a drive to copy finished files onto.
 	USBPath string `mapstructure:"usb_path" yaml:"usb_path"`
 	// CookiesFromBrowser lets yt-dlp borrow cookies for restricted videos.
@@ -55,6 +59,9 @@ func Defaults() Config {
 		OutputDir: defaultOutputDir(),
 		Model:     separate.ModelDefault,
 		Device:    separate.DeviceAuto,
+		// WAV is always produced; FLAC is the safe default extra because it
+		// is the only lossy-free option and halves the size.
+		Formats: []string{audio.EncodingFLAC},
 	}
 }
 
@@ -92,6 +99,7 @@ func Bind(v *viper.Viper) {
 	v.SetDefault("jobs", d.Jobs)
 	v.SetDefault("normalize", d.Normalize)
 	v.SetDefault("limit", d.Limit)
+	v.SetDefault("formats", d.Formats)
 	v.SetDefault("usb_path", d.USBPath)
 	v.SetDefault("cookies_from_browser", d.CookiesFromBrowser)
 
@@ -131,6 +139,9 @@ func Load(v *viper.Viper) (Config, error) {
 // messages that name the setting a user would actually edit.
 func (c Config) Validate() error {
 	v := validator.New(validator.WithRequiredStructEnabled())
+	if err := v.RegisterValidation("audioformat", validAudioFormat); err != nil {
+		return fmt.Errorf("validating config: %w", err)
+	}
 	err := v.Struct(c)
 	if err == nil {
 		return nil
@@ -166,9 +177,18 @@ func describe(fe validator.FieldError) string {
 		return fmt.Sprintf("%s must be at least %s (got %v)", name, fe.Param(), fe.Value())
 	case "lte":
 		return fmt.Sprintf("%s must be at most %s (got %v)", name, fe.Param(), fe.Value())
+	case "audioformat":
+		return fmt.Sprintf("formats: unknown format %q; choose from %s",
+			fe.Value(), strings.Join(audio.EncodingIDs(), ", "))
 	default:
 		return fmt.Sprintf("%s is invalid (got %v)", name, fe.Value())
 	}
+}
+
+// validAudioFormat reports whether a value names a supported encoding.
+func validAudioFormat(fl validator.FieldLevel) bool {
+	_, ok := audio.LookupEncoding(fl.Field().String())
+	return ok
 }
 
 // settingName converts a Go field name to the snake_case key users see.

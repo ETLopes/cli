@@ -35,12 +35,43 @@ For a track called `Some Song`, with the default 4-stem model:
 │   ├── SomeSongBass.wav
 │   ├── SomeSongVocals.wav
 │   └── SomeSongOther.wav
+├── flac/                       ← same nine tracks, other formats
+├── opus/
 ├── stems/                      ← raw Demucs output (cached for re-runs)
 └── source.m4a                  ← the original download
 ```
 
 Copy the contents of `dtx/` to the **root** of a USB stick — the module does not
-look inside folders — or let `dtx` do it with `--usb /Volumes/YOUR_DRIVE`.
+look inside folders — or let `dtx` do it with `--usb /Volumes/YOUR_DRIVE`. Only
+the WAVs are copied to the drive; the module cannot play anything else.
+
+## Sharing
+
+WAV is what the module needs, but 443 MiB is awkward to send to a bandmate. Any
+of these can be produced alongside it, each in its own folder so you can zip one
+and send it:
+
+| Format | Size (4:53 track, 9 files) | Notes |
+|---|---|---|
+| `wav` | 443 MiB | What the module plays. Always produced. |
+| `flac` | ~245 MiB | Lossless — decodes bit-identical to the WAV. Safe to re-mix. |
+| `opus` | ~40 MiB | Smallest. Transparent for listening; best quality per byte of any codec. |
+| `m4a` | ~80 MiB | AAC 256k. Plays on essentially anything, including older phones and car stereos. |
+| `mp3` | ~100 MiB | V0 VBR. Universal fallback; smaller than 320k CBR at the same perceived quality. |
+
+```sh
+dtx <url> --formats flac,opus       # or pick them in the interactive picker
+dtx <url> --formats ""              # WAV only
+```
+
+A word on "without losing quality": only `wav` and `flac` are lossless. `opus`,
+`m4a` and `mp3` are *transparent* — you will not hear the difference on playback
+— but they are lossy, and their artifacts compound if someone re-sums the stems
+in a DAW. Send `opus` to people who will play along; send `flac` to people who
+will produce with it.
+
+The compressed copies are encoded from the finished WAVs, so every format
+carries identical source audio and differs only in codec.
 
 ## Why the files look like that
 
@@ -136,7 +167,8 @@ dtx prep <url> --usb /Volumes/DTX    # copy results to a USB drive when done
 | `--shifts` | Extra quality passes; each one costs a full pass in time |
 | `--normalize` | Loudness-normalize mixes to −14 LUFS |
 | `--limit` | Brickwall limiter, if a mix clips |
-| `--usb` | Copy finished files to a drive's root |
+| `--formats` | Extra formats to produce: `flac`, `opus`, `m4a`, `mp3`. WAV is always included |
+| `--usb` | Copy finished files to a drive's root (WAVs only) |
 | `--cookies-from-browser` | Borrow cookies for age-restricted videos |
 | `-y, --yes` | Never prompt — for scripts and CI |
 | `--plain` | Line-based output instead of the live view |
@@ -166,6 +198,7 @@ dtx config init     # write one, preloaded with current settings
 output_dir: ~/Music/dtx
 model: htdemucs
 device: auto
+formats: [flac]
 normalize: false
 usb_path: /Volumes/DTX
 ```

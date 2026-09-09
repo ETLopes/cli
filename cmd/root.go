@@ -146,9 +146,17 @@ func bindChangedFlags(cmd *cobra.Command, v *viper.Viper) {
 		if !f.Changed {
 			return
 		}
-		if key, ok := flagToConfigKey[f.Name]; ok {
-			v.Set(key, f.Value.String())
+		key, ok := flagToConfigKey[f.Name]
+		if !ok {
+			return
 		}
+		// A slice flag stringifies as "[a,b]", which would not survive being
+		// unmarshalled back into a []string, so take the real slice instead.
+		if sv, isSlice := f.Value.(pflag.SliceValue); isSlice {
+			v.Set(key, sv.GetSlice())
+			return
+		}
+		v.Set(key, f.Value.String())
 	})
 }
 
@@ -162,6 +170,7 @@ var flagToConfigKey = map[string]string{
 	"jobs":                 "jobs",
 	"normalize":            "normalize",
 	"limit":                "limit",
+	"formats":              "formats",
 	"usb":                  "usb_path",
 	"cookies-from-browser": "cookies_from_browser",
 }

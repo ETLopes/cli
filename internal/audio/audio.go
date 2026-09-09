@@ -132,14 +132,38 @@ func (o Options) filters() []string {
 }
 
 // dtxOutputArgs are the encoder flags that make ffmpeg emit exactly what the
-// module expects.
+// module expects. They come from the encoding registry so the module's format
+// is defined in exactly one place.
 func dtxOutputArgs() []string {
-	return []string{
-		"-ar", strconv.Itoa(dtxspec.SampleRate),
-		"-ac", strconv.Itoa(dtxspec.Channels),
-		"-c:a", dtxspec.Codec,
-		"-f", dtxspec.Container,
+	wav, ok := LookupEncoding(EncodingWAV)
+	if !ok {
+		// Unreachable: the WAV encoding is a compile-time constant of the
+		// registry. Falling back keeps a registry edit from silently
+		// producing files the module cannot play.
+		return []string{
+			"-ar", strconv.Itoa(dtxspec.SampleRate),
+			"-ac", strconv.Itoa(dtxspec.Channels),
+			"-c:a", dtxspec.Codec,
+			"-f", dtxspec.Container,
+		}
 	}
+	return wav.Args()
+}
+
+// Encode re-encodes src into dst using enc. It is used to derive the shareable
+// copies from the already-rendered module WAVs, so the audio is identical and
+// only the container and codec differ.
+func (c *Converter) Encode(ctx context.Context, src, dst string, enc Encoding, total time.Duration, onProgress ProgressFunc) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("creating output directory: %w", err)
+	}
+
+	args := baseArgs()
+	args = append(args, "-progress", "pipe:1", "-i", src, "-vn", "-map_metadata", "-1")
+	args = append(args, enc.Args()...)
+	args = append(args, dst)
+
+	return c.runFFmpeg(ctx, args, total, onProgress, "encoding "+filepath.Base(dst))
 }
 
 // baseArgs are flags common to every ffmpeg invocation: never prompt, never
