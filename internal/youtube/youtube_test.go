@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eduardolopes/dtx/internal/runner"
-	"github.com/eduardolopes/dtx/internal/runnertest"
+	"github.com/ETLopes/cli/internal/runner"
+	"github.com/ETLopes/cli/internal/runnertest"
 )
 
 func TestInspectParsesMetadata(t *testing.T) {

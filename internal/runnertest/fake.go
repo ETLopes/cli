@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/eduardolopes/dtx/internal/runner"
+	"github.com/ETLopes/cli/internal/runner"
 )
 
 // Call records one command invocation.

@@ -1,5 +1,5 @@
-// Package cmd defines the dtx command-line interface.
-package cmd
+// Package cli defines the dtx command-line interface.
+package cli
 
 import (
 	"context"
@@ -14,8 +14,8 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
-	"github.com/eduardolopes/dtx/internal/config"
-	"github.com/eduardolopes/dtx/internal/ui"
+	"github.com/ETLopes/cli/internal/config"
+	"github.com/ETLopes/cli/internal/ui"
 )
 
 // version is overridden at build time with -ldflags "-X ...cmd.version=v1.2.3".
@@ -65,26 +65,22 @@ func newRootCmd(e *env) *cobra.Command {
 	var cfgFile string
 
 	cmd := &cobra.Command{
-		Use:   "dtx [url]",
-		Short: "Turn any video into DTX-PRO-ready drum practice tracks",
-		Long: ui.Title.Render("dtx") + ` turns a video URL into a set of WAV files a Yamaha DTX-PRO
-drum module will play: the original track, one mix per instrument removed
-(so you can play the missing part yourself), and every isolated stem.
+		Use:   "cli",
+		Short: "A personal toolbox of day-to-day tools",
+		Long: ui.Title.Render("cli") + ` is a personal toolbox. Each tool lives under its own
+subcommand, and every tool works interactively when run without arguments.
 
-Audio is downloaded with yt-dlp, split into stems with Demucs, and rendered
-with ffmpeg to the 44.1 kHz / 16-bit / stereo WAV the module requires.
-
-Run with no arguments for an interactive session.`,
+Tools:
+  dtx    turn a video into DTX-PRO-ready drum practice tracks`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Args:          cobra.MaximumNArgs(1),
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			return e.setup(cmd, cfgFile)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Bare `dtx` is the interactive entry point; `dtx <url>` is a
-			// shorthand for `dtx prep <url>`.
-			return runPrep(cmd.Context(), e, args)
+			// With no tool named there is nothing to run, so list what is
+			// available rather than failing.
+			return cmd.Help()
 		},
 	}
 
@@ -99,10 +95,7 @@ Run with no arguments for an interactive session.`,
 	pf.BoolVar(&e.plain, "plain", false, "disable the live progress view")
 	pf.BoolVarP(&e.assumeYes, "yes", "y", false, "assume yes for prompts; never prompt interactively")
 
-	cmd.AddCommand(newPrepCmd(e), newDoctorCmd(e), newConfigCmd(e), newVersionCmd())
-	// The prep flags are also accepted on the root command so `dtx <url>`
-	// behaves identically to `dtx prep <url>`.
-	registerPrepFlags(cmd.Flags())
+	cmd.AddCommand(newDTXCmd(e), newConfigCmd(e), newVersionCmd())
 	return cmd
 }
 
@@ -163,16 +156,16 @@ func bindChangedFlags(cmd *cobra.Command, v *viper.Viper) {
 // flagToConfigKey maps flag names to config keys. Flags without an entry are
 // command-scoped and never persisted.
 var flagToConfigKey = map[string]string{
-	"out":                  "output_dir",
-	"model":                "model",
-	"device":               "device",
-	"shifts":               "shifts",
-	"jobs":                 "jobs",
-	"normalize":            "normalize",
-	"limit":                "limit",
-	"formats":              "formats",
-	"usb":                  "usb_path",
-	"cookies-from-browser": "cookies_from_browser",
+	"out":                  config.KeyOutputDir,
+	"model":                config.KeyModel,
+	"device":               config.KeyDevice,
+	"shifts":               config.KeyShifts,
+	"jobs":                 config.KeyJobs,
+	"normalize":            config.KeyNormalize,
+	"limit":                config.KeyLimit,
+	"formats":              config.KeyFormats,
+	"usb":                  config.KeyUSBPath,
+	"cookies-from-browser": config.KeyCookies,
 }
 
 func newVersionCmd() *cobra.Command {
@@ -181,7 +174,7 @@ func newVersionCmd() *cobra.Command {
 		Short: "Print the dtx version",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ui.Println(ui.Title.Render("dtx") + " " + version)
+			ui.Println(ui.Title.Render("cli") + " " + version)
 			return nil
 		},
 	}

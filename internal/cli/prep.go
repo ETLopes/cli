@@ -1,4 +1,4 @@
-package cmd
+package cli
 
 import (
 	"context"
@@ -11,14 +11,14 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/eduardolopes/dtx/internal/audio"
-	"github.com/eduardolopes/dtx/internal/config"
-	"github.com/eduardolopes/dtx/internal/dtxspec"
-	"github.com/eduardolopes/dtx/internal/pipeline"
-	"github.com/eduardolopes/dtx/internal/runner"
-	"github.com/eduardolopes/dtx/internal/separate"
-	"github.com/eduardolopes/dtx/internal/ui"
-	"github.com/eduardolopes/dtx/internal/youtube"
+	"github.com/ETLopes/cli/internal/audio"
+	"github.com/ETLopes/cli/internal/config"
+	"github.com/ETLopes/cli/internal/dtxspec"
+	"github.com/ETLopes/cli/internal/pipeline"
+	"github.com/ETLopes/cli/internal/runner"
+	"github.com/ETLopes/cli/internal/separate"
+	"github.com/ETLopes/cli/internal/ui"
+	"github.com/ETLopes/cli/internal/youtube"
 )
 
 // registerPrepFlags defines the flags that control a pipeline run. They are

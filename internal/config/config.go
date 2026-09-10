@@ -13,13 +13,32 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/spf13/viper"
 
-	"github.com/eduardolopes/dtx/internal/audio"
-	"github.com/eduardolopes/dtx/internal/separate"
+	"github.com/ETLopes/cli/internal/audio"
+	"github.com/ETLopes/cli/internal/separate"
 )
 
-// EnvPrefix namespaces the environment variables this program reads, so
-// DTX_MODEL sets the Demucs model.
-const EnvPrefix = "DTX"
+// EnvPrefix namespaces the environment variables this program reads. Combined
+// with the per-tool section, CLI_DTX_MODEL sets the dtx tool's Demucs model.
+const EnvPrefix = "CLI"
+
+// Section is the config key the dtx tool's settings live under. Each tool in
+// the toolbox owns its own section, so two tools can both have an
+// "output_dir" without colliding.
+const Section = "dtx"
+
+// Config keys, fully qualified with the tool's section.
+const (
+	KeyOutputDir = Section + ".output_dir"
+	KeyModel     = Section + ".model"
+	KeyDevice    = Section + ".device"
+	KeyShifts    = Section + ".shifts"
+	KeyJobs      = Section + ".jobs"
+	KeyNormalize = Section + ".normalize"
+	KeyLimit     = Section + ".limit"
+	KeyFormats   = Section + ".formats"
+	KeyUSBPath   = Section + ".usb_path"
+	KeyCookies   = Section + ".cookies_from_browser"
+)
 
 // FileName is the config file's base name; Viper appends a supported extension.
 const FileName = "config"
@@ -76,38 +95,63 @@ func defaultOutputDir() string {
 	return filepath.Join(home, "Music", "dtx")
 }
 
+// AppName is the toolbox's name, used for its config directory. The file is
+// shared by every tool, each under its own section, so it belongs to the
+// application rather than to any one tool.
+const AppName = "cli"
+
 // Dir is the directory holding the config file.
 func Dir() string {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "dtx")
+		return filepath.Join(xdg, AppName)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "."
 	}
-	return filepath.Join(home, ".config", "dtx")
+	return filepath.Join(home, ".config", AppName)
 }
 
 // Bind wires defaults and environment handling into v. Flags are bound
 // separately by the command layer, which owns the flag definitions.
 func Bind(v *viper.Viper) {
 	d := Defaults()
-	v.SetDefault("output_dir", d.OutputDir)
-	v.SetDefault("model", d.Model)
-	v.SetDefault("device", d.Device)
-	v.SetDefault("shifts", d.Shifts)
-	v.SetDefault("jobs", d.Jobs)
-	v.SetDefault("normalize", d.Normalize)
-	v.SetDefault("limit", d.Limit)
-	v.SetDefault("formats", d.Formats)
-	v.SetDefault("usb_path", d.USBPath)
-	v.SetDefault("cookies_from_browser", d.CookiesFromBrowser)
+	defaults := map[string]any{
+		KeyOutputDir: d.OutputDir,
+		KeyModel:     d.Model,
+		KeyDevice:    d.Device,
+		KeyShifts:    d.Shifts,
+		KeyJobs:      d.Jobs,
+		KeyNormalize: d.Normalize,
+		KeyLimit:     d.Limit,
+		KeyFormats:   d.Formats,
+		KeyUSBPath:   d.USBPath,
+		KeyCookies:   d.CookiesFromBrowser,
+	}
+	for key, val := range defaults {
+		v.SetDefault(key, val)
+	}
 
 	v.SetConfigName(FileName)
 	v.AddConfigPath(Dir())
 	v.SetEnvPrefix(EnvPrefix)
-	v.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	v.AutomaticEnv()
+
+	// AutomaticEnv alone does not reliably resolve nested keys, so each one is
+	// bound explicitly. CLI_DTX_MODEL then maps to dtx.model.
+	for key := range defaults {
+		// BindEnv only fails when given no arguments.
+		_ = v.BindEnv(key)
+	}
+}
+
+// allKeys lists every setting, used to read the config back out.
+func allKeys() []string {
+	return []string{
+		KeyOutputDir, KeyModel, KeyDevice, KeyShifts, KeyJobs,
+		KeyNormalize, KeyLimit, KeyFormats, KeyUSBPath, KeyCookies,
+	}
 }
 
 // Load reads configuration from v. A missing config file is not an error --
@@ -121,9 +165,21 @@ func Load(v *viper.Viper) (Config, error) {
 		}
 	}
 
-	cfg := Defaults()
-	if err := v.Unmarshal(&cfg); err != nil {
-		return Config{}, fmt.Errorf("reading config: %w", err)
+	// Each value is read through v.Get so defaults, the config file, the
+	// environment and explicitly-set flags all resolve by the same rules.
+	// v.UnmarshalKey does not consult bound environment variables for nested
+	// keys, which would silently ignore CLI_DTX_* settings.
+	cfg := Config{
+		OutputDir:          v.GetString(KeyOutputDir),
+		Model:              v.GetString(KeyModel),
+		Device:             v.GetString(KeyDevice),
+		Shifts:             v.GetInt(KeyShifts),
+		Jobs:               v.GetInt(KeyJobs),
+		Normalize:          v.GetBool(KeyNormalize),
+		Limit:              v.GetBool(KeyLimit),
+		Formats:            v.GetStringSlice(KeyFormats),
+		USBPath:            v.GetString(KeyUSBPath),
+		CookiesFromBrowser: v.GetString(KeyCookies),
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err

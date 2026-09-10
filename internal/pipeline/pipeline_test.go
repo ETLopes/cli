@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eduardolopes/dtx/internal/audio"
-	"github.com/eduardolopes/dtx/internal/dtxspec"
-	"github.com/eduardolopes/dtx/internal/runner"
-	"github.com/eduardolopes/dtx/internal/runnertest"
-	"github.com/eduardolopes/dtx/internal/separate"
-	"github.com/eduardolopes/dtx/internal/youtube"
+	"github.com/ETLopes/cli/internal/audio"
+	"github.com/ETLopes/cli/internal/dtxspec"
+	"github.com/ETLopes/cli/internal/runner"
+	"github.com/ETLopes/cli/internal/runnertest"
+	"github.com/ETLopes/cli/internal/separate"
+	"github.com/ETLopes/cli/internal/youtube"
 )
 
 const (

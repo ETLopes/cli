@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eduardolopes/dtx/internal/runner"
-	"github.com/eduardolopes/dtx/internal/runnertest"
+	"github.com/ETLopes/cli/internal/runner"
+	"github.com/ETLopes/cli/internal/runnertest"
 )
 
 // writeStems imitates what Demucs leaves on disk.

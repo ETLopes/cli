@@ -1,4 +1,4 @@
-module github.com/eduardolopes/dtx
+module github.com/ETLopes/cli
 
 go 1.26.2
 

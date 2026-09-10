@@ -17,10 +17,10 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/eduardolopes/dtx/internal/audio"
-	"github.com/eduardolopes/dtx/internal/runner"
-	"github.com/eduardolopes/dtx/internal/separate"
-	"github.com/eduardolopes/dtx/internal/youtube"
+	"github.com/ETLopes/cli/internal/audio"
+	"github.com/ETLopes/cli/internal/runner"
+	"github.com/ETLopes/cli/internal/separate"
+	"github.com/ETLopes/cli/internal/youtube"
 )
 
 // pythonVersion is the interpreter provisioned for Demucs. It deliberately
@@ -152,7 +152,7 @@ func (c *Checker) demucsStatus(ctx context.Context) Status {
 		Name:     separate.Tool,
 		Required: true,
 		Managed:  true,
-		Hint:     "run 'dtx doctor --install' to set it up automatically",
+		Hint:     "run 'cli dtx doctor --install' to set it up automatically",
 	}
 	if path, err := exec.LookPath(separate.Tool); err == nil {
 		s.Path = path

@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/viper"
 
-	"github.com/eduardolopes/dtx/internal/audio"
-	"github.com/eduardolopes/dtx/internal/separate"
+	"github.com/ETLopes/cli/internal/audio"
+	"github.com/ETLopes/cli/internal/separate"
 )
 
 // newViper returns a Viper rooted at an isolated config directory.
@@ -21,8 +21,11 @@ func newViper(t *testing.T) *viper.Viper {
 	return v
 }
 
+// writeConfig writes a config file, nesting body under the tool's section so
+// tests express settings the way a user would.
 func writeConfig(t *testing.T, body string) {
 	t.Helper()
+	body = Section + ":\n" + indent(body)
 	dir := Dir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -30,6 +33,19 @@ func writeConfig(t *testing.T, body string) {
 	if err := os.WriteFile(filepath.Join(dir, FileName+".yaml"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// indent shifts every non-empty line one level in, for nesting under a section.
+func indent(body string) string {
+	var out strings.Builder
+	for _, line := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
+		if strings.TrimSpace(line) == "" {
+			out.WriteString("\n")
+			continue
+		}
+		out.WriteString("  " + line + "\n")
+	}
+	return out.String()
 }
 
 func TestLoadWithNoConfigFileUsesDefaults(t *testing.T) {
@@ -71,7 +87,7 @@ func TestLoadReadsConfigFile(t *testing.T) {
 func TestEnvironmentOverridesConfigFile(t *testing.T) {
 	v := newViper(t)
 	writeConfig(t, "model: htdemucs\n")
-	t.Setenv("DTX_MODEL", separate.ModelSixStem)
+	t.Setenv("CLI_DTX_MODEL", separate.ModelSixStem)
 
 	cfg, err := Load(v)
 	if err != nil {
@@ -87,8 +103,8 @@ func TestEnvironmentOverridesConfigFile(t *testing.T) {
 func TestExplicitSetOverridesEverything(t *testing.T) {
 	v := newViper(t)
 	writeConfig(t, "model: htdemucs\n")
-	t.Setenv("DTX_MODEL", separate.ModelSixStem)
-	v.Set("model", separate.ModelFineTuned)
+	t.Setenv("CLI_DTX_MODEL", separate.ModelSixStem)
+	v.Set(KeyModel, separate.ModelFineTuned)
 
 	cfg, err := Load(v)
 	if err != nil {

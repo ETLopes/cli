@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eduardolopes/dtx/internal/runnertest"
+	"github.com/ETLopes/cli/internal/runnertest"
 )
 
 // Version banners differ wildly between tools, so the parser has to find the

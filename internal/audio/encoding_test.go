@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eduardolopes/dtx/internal/runnertest"
+	"github.com/ETLopes/cli/internal/runnertest"
 )
 
 // WAV is what the module plays, so it must survive every request -- including

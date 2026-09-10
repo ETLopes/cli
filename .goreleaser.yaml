@@ -1,0 +1,80 @@
+# GoReleaser configuration for the cli toolbox.
+# Docs: https://goreleaser.com
+version: 2
+
+project_name: cli
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: cli
+    main: .
+    binary: cli
+    env:
+      # The toolbox shells out to ffmpeg, yt-dlp and Demucs rather than
+      # linking any C, so a static binary keeps the archives portable across
+      # distributions.
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/ETLopes/cli/internal/cli.version={{ .Version }}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    # Windows users are far more likely to have a zip handler than tar.
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: ETLopes
+    name: cli
+  draft: false
+  # Tags such as v0.2.0-rc1 are published as pre-releases automatically.
+  prerelease: auto
+  name_template: "v{{ .Version }}"
+  footer: |
+    ## Install
+
+    Download the archive for your platform below, or:
+
+    ```sh
+    go install github.com/ETLopes/cli@{{ .Tag }}
+    ```
+
+    `cli dtx` additionally needs `ffmpeg`, `ffprobe` and `yt-dlp` on your PATH;
+    run `cli dtx doctor --install` to set up Demucs.

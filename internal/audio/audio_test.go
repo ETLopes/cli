@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eduardolopes/dtx/internal/dtxspec"
-	"github.com/eduardolopes/dtx/internal/runner"
-	"github.com/eduardolopes/dtx/internal/runnertest"
+	"github.com/ETLopes/cli/internal/dtxspec"
+	"github.com/ETLopes/cli/internal/runner"
+	"github.com/ETLopes/cli/internal/runnertest"
 )
 
 func probeJSON(codec string, rate, channels int, duration string) string {

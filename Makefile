@@ -1,6 +1,6 @@
-BINARY := dtx
+BINARY := cli
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -s -w -X github.com/eduardolopes/dtx/cmd.version=$(VERSION)
+LDFLAGS := -s -w -X github.com/ETLopes/cli/internal/cli.version=$(VERSION)
 
 .DEFAULT_GOAL := build
 
@@ -35,9 +35,13 @@ lint: ## Vet and check formatting
 tidy: ## Tidy go.mod
 	go mod tidy
 
+.PHONY: snapshot
+snapshot: ## Build release archives locally without publishing
+	goreleaser release --snapshot --clean
+
 .PHONY: clean
 clean: ## Remove build artifacts
-	rm -rf bin coverage.out
+	rm -rf bin dist coverage.out
 
 .PHONY: help
 help: ## Show this help

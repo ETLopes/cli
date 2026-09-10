@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eduardolopes/dtx/internal/dtxspec"
-	"github.com/eduardolopes/dtx/internal/runner"
+	"github.com/ETLopes/cli/internal/dtxspec"
+	"github.com/ETLopes/cli/internal/runner"
 )
 
 // Tool names, resolved on PATH.

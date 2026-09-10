@@ -1,14 +1,14 @@
-package cmd
+package cli
 
 import (
 	"fmt"
 
 	"github.com/spf13/cobra"
 
-	"github.com/eduardolopes/dtx/internal/deps"
-	"github.com/eduardolopes/dtx/internal/runner"
-	"github.com/eduardolopes/dtx/internal/separate"
-	"github.com/eduardolopes/dtx/internal/ui"
+	"github.com/ETLopes/cli/internal/deps"
+	"github.com/ETLopes/cli/internal/runner"
+	"github.com/ETLopes/cli/internal/separate"
+	"github.com/ETLopes/cli/internal/ui"
 )
 
 func newDoctorCmd(e *env) *cobra.Command {

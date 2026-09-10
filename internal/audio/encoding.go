@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/eduardolopes/dtx/internal/dtxspec"
+	"github.com/ETLopes/cli/internal/dtxspec"
 )
 
 // Encoding describes one output format: how ffmpeg should encode it, what to

@@ -1,4 +1,4 @@
-package cmd
+package cli
 
 import (
 	"context"
@@ -8,10 +8,10 @@ import (
 
 	"charm.land/huh/v2"
 
-	"github.com/eduardolopes/dtx/internal/deps"
-	"github.com/eduardolopes/dtx/internal/runner"
-	"github.com/eduardolopes/dtx/internal/separate"
-	"github.com/eduardolopes/dtx/internal/ui"
+	"github.com/ETLopes/cli/internal/deps"
+	"github.com/ETLopes/cli/internal/runner"
+	"github.com/ETLopes/cli/internal/separate"
+	"github.com/ETLopes/cli/internal/ui"
 )
 
 // toolset is the set of resolved external tools a run will use.

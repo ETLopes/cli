@@ -1,4 +1,4 @@
-package cmd
+package cli
 
 import (
 	"fmt"
@@ -9,14 +9,14 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/eduardolopes/dtx/internal/config"
-	"github.com/eduardolopes/dtx/internal/ui"
+	"github.com/ETLopes/cli/internal/config"
+	"github.com/ETLopes/cli/internal/ui"
 )
 
 func newConfigCmd(e *env) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
-		Short: "Inspect and initialize dtx configuration",
+		Short: "Inspect and initialize cli configuration",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -64,7 +64,7 @@ func newConfigShowCmd(e *env) *cobra.Command {
 			if used := e.v.ConfigFileUsed(); used != "" {
 				ui.Println(ui.Muted.Render("  loaded from " + used))
 			} else {
-				ui.Println(ui.Muted.Render("  no config file; using defaults (run 'dtx config init' to create one)"))
+				ui.Println(ui.Muted.Render("  no config file; using defaults (run 'cli config init' to create one)"))
 			}
 			return nil
 		},
@@ -99,7 +99,9 @@ func newConfigInitCmd(e *env) *cobra.Command {
 				return fmt.Errorf("creating config directory: %w", err)
 			}
 
-			body, err := yaml.Marshal(e.cfg)
+			// Settings are nested under the tool's section so other tools
+			// can add their own without colliding.
+			body, err := yaml.Marshal(map[string]any{config.Section: e.cfg})
 			if err != nil {
 				return fmt.Errorf("encoding config: %w", err)
 			}
@@ -116,10 +118,10 @@ func newConfigInitCmd(e *env) *cobra.Command {
 	return cmd
 }
 
-const configHeader = `# dtx configuration.
+const configHeader = `# cli configuration.
 #
-# Every setting here can be overridden by a command-line flag, or by an
-# environment variable such as DTX_MODEL.
+# Each tool owns a section. Every setting can be overridden by a command-line
+# flag, or by an environment variable such as CLI_DTX_MODEL.
 `
 
 func orDash(s string) string {

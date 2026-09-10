@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eduardolopes/dtx/internal/runner"
+	"github.com/ETLopes/cli/internal/runner"
 )
 
 // Tool is the executable this package drives.

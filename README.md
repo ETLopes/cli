@@ -1,21 +1,46 @@
-# dtx
+# cli
 
-Turn any video into practice tracks a **Yamaha DTX-PRO** drum module will play.
+A personal toolbox of day-to-day tools. Each tool lives under its own
+subcommand and works interactively when run without arguments.
+
+| Tool | What it does |
+|---|---|
+| `cli dtx` | Turn any video into practice tracks a Yamaha DTX-PRO drum module will play |
+
+## Install
+
+```sh
+go install github.com/ETLopes/cli@latest
+```
+
+Or grab a prebuilt binary for your platform from the
+[latest release](https://github.com/ETLopes/cli/releases/latest).
+
+Building from a clone:
+
+```sh
+make install     # builds and installs to $GOPATH/bin
+```
+
+---
+
+# cli dtx
 
 Give it a URL and it downloads the audio, splits it into instrument stems with
 [Demucs](https://github.com/adefossez/demucs), and renders everything as the
-44.1 kHz / 16-bit / stereo WAV the module requires — including a **"minus-one"
+44.1 kHz / 16-bit / stereo WAV the DTX-PRO requires — including a **"minus-one"
 mix for every instrument**, so you can mute the drums and play them yourself.
 
 ```
-$ dtx https://www.youtube.com/watch?v=...
+$ cli dtx https://www.youtube.com/watch?v=...
 
-dtx  preparing practice tracks
+cli  preparing practice tracks
 
   ✓ Inspecting    Some Song (Official Video)
   ✓ Downloading   source.m4a
   ⠸ Separating    ████████████░░░░░░░░  62%  htdemucs
     Rendering
+    Encoding
     Exporting
 ```
 
@@ -60,8 +85,8 @@ and send it:
 | `mp3` | ~100 MiB | V0 VBR. Universal fallback; smaller than 320k CBR at the same perceived quality. |
 
 ```sh
-dtx <url> --formats flac,opus       # or pick them in the interactive picker
-dtx <url> --formats ""              # WAV only
+cli dtx <url> --formats flac,opus   # or pick them in the interactive picker
+cli dtx <url> --formats ""          # WAV only
 ```
 
 A word on "without losing quality": only `wav` and `flac` are lossless. `opus`,
@@ -108,19 +133,7 @@ That naming rule drives three transformations, all in `internal/dtxspec`:
 Shrinking each name to fit its own suffix would give every file a different
 base, which is hard to scan on a small display and sorts badly.
 
-## Install
-
-```sh
-go install github.com/eduardolopes/dtx@latest
-```
-
-Or from a clone:
-
-```sh
-make install     # builds and installs to $GOPATH/bin
-```
-
-### Dependencies
+## Dependencies
 
 `ffmpeg`, `ffprobe` and `yt-dlp` must be on your PATH:
 
@@ -133,9 +146,9 @@ Demucs is Python, and `dtx` manages it for you in an isolated environment
 you use for your own work:
 
 ```sh
-dtx doctor            # show what is and is not installed
-dtx doctor --install  # set up Demucs (~2 GB; pulls in PyTorch)
-dtx doctor --uninstall
+cli dtx doctor            # show what is and is not installed
+cli dtx doctor --install  # set up Demucs
+cli dtx doctor --uninstall
 ```
 
 If you already have `demucs` on your PATH, `dtx` uses that instead and leaves
@@ -144,17 +157,17 @@ your setup alone.
 > **Note:** demucs 4.1.0 imports `numpy` but omits it from its package metadata,
 > and torch no longer installs it transitively. A plain `pip install demucs`
 > therefore succeeds and then fails at runtime with `ModuleNotFoundError`.
-> `dtx doctor --install` installs it explicitly and runs demucs once afterwards
+> `cli dtx doctor --install` installs it explicitly and runs demucs once afterwards
 > to prove the environment works, rather than discovering the problem minutes
 > into a pipeline run.
 
 ## Usage
 
 ```sh
-dtx                                  # interactive: prompts for URL and quality
-dtx <url>                            # straight to work
-dtx prep <url> --model htdemucs_ft   # slower, cleaner separation
-dtx prep <url> --usb /Volumes/DTX    # copy results to a USB drive when done
+cli dtx                                  # interactive: URL, quality, formats
+cli dtx <url>                            # straight to work
+cli dtx prep <url> --model htdemucs_ft   # slower, cleaner separation
+cli dtx prep <url> --usb /Volumes/DTX    # copy results to a USB drive when done
 ```
 
 ### Useful flags
@@ -188,23 +201,27 @@ Settings resolve in this order, each overriding the last: defaults → config fi
 → `DTX_`-prefixed environment variables → command-line flags.
 
 ```sh
-dtx config show     # what is in effect right now, and where it came from
-dtx config path     # where the config file lives
-dtx config init     # write one, preloaded with current settings
+cli config show     # what is in effect right now, and where it came from
+cli config path     # where the config file lives
+cli config init     # write one, preloaded with current settings
 ```
 
+Each tool owns a section, so two tools can both have an `output_dir` without
+colliding.
+
 ```yaml
-# ~/.config/dtx/config.yaml
-output_dir: ~/Music/dtx
-model: htdemucs
-device: auto
-formats: [flac]
-normalize: false
-usb_path: /Volumes/DTX
+# ~/.config/cli/config.yaml
+dtx:
+  output_dir: ~/Music/dtx
+  model: htdemucs
+  device: auto
+  formats: [flac]
+  normalize: false
+  usb_path: /Volumes/DTX
 ```
 
 ```sh
-DTX_MODEL=htdemucs_ft dtx <url>
+CLI_DTX_MODEL=htdemucs_ft cli dtx <url>
 ```
 
 ## A note on mixing
@@ -229,6 +246,7 @@ Demucs required to run the suite.
 
 ```
 internal/
+├── cli/        cobra command tree: the toolbox root and each tool
 ├── dtxspec/    the module's requirements: format, limits, naming rules
 ├── runner/     external process execution, streaming output, cancellation
 ├── youtube/    yt-dlp
