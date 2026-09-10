@@ -1,5 +1,9 @@
 # cli
 
+[![Release](https://img.shields.io/github/v/release/ETLopes/cli?logo=github)](https://github.com/ETLopes/cli/releases/latest)
+[![Go](https://img.shields.io/github/go-mod/go-version/ETLopes/cli?logo=go)](go.mod)
+[![License](https://img.shields.io/github/license/ETLopes/cli)](LICENSE)
+
 A personal toolbox of day-to-day tools. Each tool lives under its own
 subcommand and works interactively when run without arguments.
 
@@ -257,6 +261,17 @@ internal/
 ├── config/     defaults, file, env, flags
 └── ui/         Bubble Tea progress view, Lip Gloss styling, Huh prompts
 ```
+
+## License
+
+[MIT](LICENSE) — Copyright (c) 2026 Eduardo Lopes.
+
+`cli dtx` drives three external tools that carry their own licences:
+[ffmpeg](https://ffmpeg.org) (LGPL/GPL depending on build),
+[yt-dlp](https://github.com/yt-dlp/yt-dlp) (Unlicense) and
+[Demucs](https://github.com/adefossez/demucs) (MIT). They are invoked as
+separate processes, not linked in, and none of them ship inside the released
+binaries.
 
 ## Sources
 
