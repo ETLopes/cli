@@ -430,3 +430,51 @@ func TestLevelFormatting(t *testing.T) {
 		}
 	}
 }
+
+// "-20" means twenty decibels quieter, so absolute negative levels need a
+// spelling of their own. Without one, "set the monitors to -20 dB" cannot be
+// expressed at all: the relative reading is refused as an implausible jump.
+func TestAbsoluteNegativeLevels(t *testing.T) {
+	adj, err := ParseAdjustment("@-20")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if adj.Relative {
+		t.Error("@-20 should be absolute")
+	}
+	if adj.Delta != -20 {
+		t.Errorf("delta = %v, want -20", adj.Delta)
+	}
+
+	// Applying it sets the level outright, regardless of where it was.
+	got, err := adj.Apply(-3, MaxMonitorLevel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != -20 {
+		t.Errorf("got %v, want -20", got)
+	}
+
+	// The relative spelling of the same number is still refused as too big.
+	rel, _ := ParseAdjustment("-20")
+	if _, err := rel.Apply(-3, MaxMonitorLevel); err == nil {
+		t.Error("-20 as a relative change should still be refused")
+	}
+
+	if _, err := ParseAdjustment("@"); err == nil {
+		t.Error("a bare '@' should be rejected")
+	}
+	if _, err := ParseAdjustment("@abc"); err == nil {
+		t.Error("'@abc' should be rejected")
+	}
+}
+
+func TestAbsolutePositiveStillWorks(t *testing.T) {
+	adj, err := ParseAdjustment("@3")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if adj.Relative || adj.Delta != 3 {
+		t.Errorf("@3 = %+v, want absolute 3", adj)
+	}
+}

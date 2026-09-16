@@ -112,7 +112,15 @@ type Adjustment struct {
 //
 // A leading sign means "relative to where it is now", which is how a musician
 // asks for change: "more guitar" is +3, not an absolute value they would have
-// to look up first. Without a sign the value is absolute.
+// to look up first. An unsigned value is absolute.
+//
+// That leaves absolute negative levels with no spelling of their own, since
+// "-20" already means "twenty quieter". A leading "@" supplies one, so
+// "@-20" sets the level to -20 dB outright and reads as "at -20 dB".
+//
+// "=" is accepted too, but is not the documented form: zsh expands a leading
+// "=" to a command path, so "=-20" fails in the user's shell before it ever
+// reaches this program.
 func ParseAdjustment(raw string) (Adjustment, error) {
 	s := strings.TrimSpace(raw)
 	if s == "" {
@@ -122,10 +130,22 @@ func ParseAdjustment(raw string) (Adjustment, error) {
 		return Adjustment{Delta: MinLevel}, nil
 	}
 
-	relative := s[0] == '+' || s[0] == '-'
+	// "@" forces an absolute reading, which is the only way to reach a
+	// negative absolute level.
+	absolute := strings.HasPrefix(s, "@") || strings.HasPrefix(s, "=")
+	if absolute {
+		s = s[1:]
+	}
+	if s == "" {
+		return Adjustment{}, fmt.Errorf("%q is missing a level after the prefix", raw)
+	}
+
+	relative := !absolute && (s[0] == '+' || s[0] == '-')
 	v, err := strconv.ParseFloat(s, 64)
 	if err != nil {
-		return Adjustment{}, fmt.Errorf("%q is not a level; use a number such as +3, -2 or 0", raw)
+		return Adjustment{}, fmt.Errorf(
+			"%q is not a level; use +3 or -2 to change by that much, 0 to set unity, "+
+				"@-20 to set an exact level, or off to silence it", raw)
 	}
 	if math.IsNaN(v) || math.IsInf(v, 0) {
 		return Adjustment{}, fmt.Errorf("%q is not a usable level", raw)

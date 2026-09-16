@@ -263,7 +263,11 @@ A signed level changes by that amount; an unsigned one sets it absolutely:
   cli studio cue 1 guitar +3     three decibels louder
   cli studio cue 1 bass -2       two decibels quieter
   cli studio cue 2 guitar 0      set to unity
-  cli studio cue 3 dtx off       silence it`,
+  cli studio cue 3 keyboard @-6  set to exactly -6 dB
+  cli studio cue 3 dtx off       silence it
+
+Because "-6" already means "six quieter", an exact negative level is
+written with a leading "@".`,
 		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cueID, err := strconv.Atoi(args[0])
@@ -314,7 +318,17 @@ func newStudioMonitorCmd(e *env) *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "volume <level>",
 		Short: "Set the monitor level (never above unity)",
-		Args:  cobra.ExactArgs(1),
+		Long: `Sets the control-room level. It is capped at unity: boosting the
+speakers above the mix is never what anyone means, and getting it wrong is
+painful.
+
+  cli studio monitor volume -3     three decibels quieter
+  cli studio monitor volume @-20   set to exactly -20 dB
+  cli studio monitor volume 0      unity
+
+Because "-20" already means "twenty quieter", an exact level is written
+with a leading "@".`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			adj, err := studio.ParseAdjustment(args[0])
 			if err != nil {
