@@ -24,7 +24,12 @@ func newConfigCmd(e *env) *cobra.Command {
 		Short: "Inspect and initialize cli configuration",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
+			// With a terminal, editing settings is the point; without one,
+			// listing the subcommands is all that is useful.
+			if !e.interactive() {
+				return cmd.Help()
+			}
+			return runConfigTUI(e)
 		},
 	}
 	cmd.AddCommand(
