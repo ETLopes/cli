@@ -408,6 +408,25 @@ function ops.setfxconfig(args)
   return tostring(ok) .. "|" .. tostring(now)
 end
 
+-- trackchunk returns a managed track's full state, which includes REAPER's
+-- own serialisation of each plugin alongside the plugin's private state.
+function ops.trackchunk(args)
+  local tr = find_managed(args[1])
+  if not tr then error("no managed track for " .. tostring(args[1])) end
+  local ok, chunk = reaper.GetTrackStateChunk(tr, "", false)
+  if not ok then error("could not read the track state") end
+  return chunk
+end
+
+function ops.delfx(args)
+  local tr = find_managed(args[1])
+  if not tr then error("no managed track for " .. tostring(args[1])) end
+  local idx = fx_index(tr, args[2])
+  if idx < 0 then return "absent" end
+  reaper.TrackFX_Delete(tr, idx)
+  return "deleted"
+end
+
 function ops.save()
   -- An untitled project is refused rather than saved. REAPER answers a save
   -- on an untitled project with a modal file dialog, which blocks its main
