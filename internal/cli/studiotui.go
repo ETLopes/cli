@@ -88,6 +88,13 @@ type studioModel struct {
 	conRows []consoleRow
 	conChan int
 	conRow  int
+
+	// The patch page edits a working copy: changing which input an
+	// instrument uses is a change to the shape of the studio, so it takes a
+	// deliberate save rather than applying as you scroll.
+	patch      []patchEntry
+	patchRow   int
+	patchDirty bool
 	// showHelp keeps the explanation of the selected control on screen. On by
 	// default, since not knowing what a control does is the common case.
 	showHelp bool
@@ -126,6 +133,7 @@ func newStudioModel(ctx context.Context, s *studioEnv) studioModel {
 		rows:    map[string]row{},
 	}
 	m.conRows = consoleRows()
+	m.patch = patchEntries()
 	m.showHelp = true
 	m.rebuild()
 	return m
@@ -137,11 +145,17 @@ func (m studioModel) onConsole() bool { return m.current().title == consoleTitle
 // consoleTitle names the console page.
 const consoleTitle = "CONSOLE"
 
+// patchTitle names the input patching page.
+const patchTitle = "INPUTS"
+
+// onPatch reports whether the patch page is showing.
+func (m studioModel) onPatch() bool { return m.current().title == patchTitle }
+
 // rebuild constructs the tab contents from the session. Rows close over the
 // session, so they always read live values rather than a stale copy.
 func (m *studioModel) rebuild() {
 	session := m.studio.session
-	tabs := []tab{{title: consoleTitle}}
+	tabs := []tab{{title: consoleTitle}, {title: patchTitle}}
 
 	for _, bus := range studio.CueBuses() {
 		cueID := bus.CueID
@@ -391,6 +405,9 @@ func (m studioModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.onConsole() {
 		return m.handleConsoleKey(msg)
 	}
+	if m.onPatch() {
+		return m.handlePatchKey(msg)
+	}
 
 	switch msg.String() {
 
@@ -628,6 +645,92 @@ func (m studioModel) pushConsole(instrumentID string, r consoleRow) tea.Cmd {
 	}
 }
 
+// handlePatchKey drives the input assignment.
+func (m studioModel) handlePatchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if len(m.patch) == 0 {
+		return m, nil
+	}
+	e := &m.patch[m.patchRow]
+
+	switch msg.String() {
+	case "up", "k":
+		if m.patchRow > 0 {
+			m.patchRow--
+		}
+		return m, nil
+	case "down", "j":
+		if m.patchRow < len(m.patch)-1 {
+			m.patchRow++
+		}
+		return m, nil
+	case "left", "-":
+		if e.Channel > 1 {
+			e.Channel--
+			m.patchDirty = true
+		}
+		return m, nil
+	case "right", "+", "=":
+		limit := maxInput
+		if e.Stereo {
+			limit = maxInput - 1
+		}
+		if e.Channel < limit {
+			e.Channel++
+			m.patchDirty = true
+		}
+		return m, nil
+	case "m", " ":
+		e.Stereo = !e.Stereo
+		if e.Stereo && e.Channel >= maxInput {
+			e.Channel = maxInput - 1
+		}
+		m.patchDirty = true
+		return m, nil
+	case "tab":
+		m.tabIdx = (m.tabIdx + 1) % len(m.tabs)
+		m.cursor, m.offset = 0, 0
+		return m, nil
+	case "shift+tab":
+		m.tabIdx = (m.tabIdx - 1 + len(m.tabs)) % len(m.tabs)
+		m.cursor, m.offset = 0, 0
+		return m, nil
+	case "s":
+		for i := range m.patch {
+			if patchConflict(m.patch, i) != "" {
+				m.status, m.statusErr = i18n.T("patch.conflicts"), true
+				return m, nil
+			}
+		}
+		if err := savePatch(m.patch); err != nil {
+			m.status, m.statusErr = firstLine(err.Error()), true
+			return m, nil
+		}
+		m.patchDirty = false
+		m.status, m.statusErr = i18n.T("patch.saved"), false
+		// The console follows the rig, so it is rebuilt around the new one.
+		m.conRows = consoleRows()
+		m.conChan, m.conRow = 0, 0
+		m.rebuild()
+		return m, m.applyTopology()
+	}
+	return m, nil
+}
+
+// applyTopology pushes the new assignment to REAPER, which is what actually
+// moves a track onto a different input.
+func (m studioModel) applyTopology() tea.Cmd {
+	if !m.connected {
+		return nil
+	}
+	st, ctx := m.studio, m.ctx
+	return func() tea.Msg {
+		c, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		_, err := st.dawc.Setup(c)
+		return syncedMsg{label: patchTitle, err: err}
+	}
+}
+
 func (m studioModel) View() tea.View {
 	if m.quitting {
 		return tea.NewView("")
@@ -672,6 +775,24 @@ func (m studioModel) View() tea.View {
 		b.WriteString("   " + ui.Muted.Render("←/→"))
 	}
 	b.WriteString("\n\n")
+
+	if m.onPatch() {
+		b.WriteString(renderPatch(m.patch, m.patchRow, m.width))
+		if m.patchDirty {
+			b.WriteString("\n  " + ui.Warn.Render("● "+i18n.T("patch.unsaved")) + "\n")
+		}
+		if m.status != "" {
+			if m.statusErr {
+				b.WriteString("\n  " + ui.Warning(truncate(m.status, max(20, m.width-4))) + "\n")
+			} else {
+				b.WriteString("\n  " + ui.Success(m.status) + "\n")
+			}
+		}
+		b.WriteString("\n  " + ui.Muted.Render(i18n.T("patch.keys")) + "\n")
+		v := tea.NewView(b.String())
+		v.AltScreen = true
+		return v
+	}
 
 	if m.onConsole() {
 		b.WriteString(renderConsole(m.studio.session, m.conRows, m.conChan, m.conRow, m.width))

@@ -123,4 +123,16 @@ var en = map[string]string{
 	"set.saved":         "saved",
 	"set.unsaved":       "unsaved changes",
 	"set.title":         "settings",
+
+	// Input patching.
+	"patch.input":     "input",
+	"patch.inputs":    "inputs",
+	"patch.mono":      "mono",
+	"patch.stereo":    "stereo",
+	"patch.conflict":  "clashes with %s",
+	"patch.free":      "free inputs",
+	"patch.keys":      "↑/↓ instrument · ←/→ input · m mono/stereo · s save · tab page · q quit",
+	"patch.saved":     "saved and applied to REAPER",
+	"patch.unsaved":   "unsaved — press s to apply",
+	"patch.conflicts": "fix the clashes before saving",
 }

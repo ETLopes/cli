@@ -367,3 +367,50 @@ func TestConfigSetKeepsTypes(t *testing.T) {
 		t.Errorf("typedValue(\"pt\") = %#v, want the string", got)
 	}
 }
+
+// --- input patching ---
+
+// Two instruments on one input means one of them records the wrong thing, so
+// the clash is named per row rather than discovered on save.
+func TestPatchDetectsClashes(t *testing.T) {
+	entries := []patchEntry{
+		{ID: "a", Name: "A", Channel: 1},
+		{ID: "b", Name: "B", Channel: 2},
+		{ID: "c", Name: "C", Channel: 5, Stereo: true},
+	}
+	for i := range entries {
+		if got := patchConflict(entries, i); got != "" {
+			t.Errorf("entry %d reported a clash with %q on a clean patch", i, got)
+		}
+	}
+
+	// A stereo instrument claims the next channel too.
+	entries = append(entries, patchEntry{ID: "d", Name: "D", Channel: 6})
+	if got := patchConflict(entries, 3); got != "C" {
+		t.Errorf("D on input 6 should clash with stereo C on 5/6, got %q", got)
+	}
+	if got := patchConflict(entries, 2); got != "D" {
+		t.Errorf("the clash should be reported from both sides, got %q", got)
+	}
+}
+
+// The patch page moves inputs; it must leave the outputs alone.
+func TestPatchKeepsBuses(t *testing.T) {
+	before := studio.Current()
+	entries := patchEntries()
+	entries[0].Channel = 9
+
+	got := patchTopology(entries)
+	if len(got.Cues) != len(before.Cues) {
+		t.Errorf("got %d cue buses, want %d", len(got.Cues), len(before.Cues))
+	}
+	if got.Main.Output != before.Main.Output {
+		t.Errorf("main output changed to %v", got.Main.Output)
+	}
+	if got.Instruments[0].Input != 9 {
+		t.Errorf("the edited input did not carry through: %d", got.Instruments[0].Input)
+	}
+	if err := got.Validate(); err != nil {
+		t.Errorf("a valid reassignment was refused: %v", err)
+	}
+}

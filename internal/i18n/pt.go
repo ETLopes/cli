@@ -116,4 +116,15 @@ var pt = map[string]string{
 	"set.saved":         "salvo",
 	"set.unsaved":       "alterações não salvas",
 	"set.title":         "configurações",
+
+	"patch.input":     "entrada",
+	"patch.inputs":    "entradas",
+	"patch.mono":      "mono",
+	"patch.stereo":    "estéreo",
+	"patch.conflict":  "conflita com %s",
+	"patch.free":      "entradas livres",
+	"patch.keys":      "↑/↓ instrumento · ←/→ entrada · m mono/estéreo · s salvar · tab muda de página · q sair",
+	"patch.saved":     "salvo e aplicado no REAPER",
+	"patch.unsaved":   "não salvo — aperte s para aplicar",
+	"patch.conflicts": "resolva os conflitos antes de salvar",
 }

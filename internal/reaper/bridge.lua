@@ -649,6 +649,27 @@ function ops.setchannel(args)
   return "ok"
 end
 
+-- peaks reports the level arriving on each managed track right now.
+--
+-- This is the one measurement that separates a routing problem from a
+-- hardware one: if nothing is arriving, no amount of correct routing inside
+-- REAPER will produce sound.
+function ops.peaks(args)
+  local out = {}
+  for _, role in ipairs(split(args[1] or "", ",")) do
+    local tr = find_managed(role)
+    if tr then
+      local l = reaper.Track_GetPeakInfo(tr, 0)
+      local r = reaper.Track_GetPeakInfo(tr, 1)
+      local peak = math.max(l, r)
+      local db = -150
+      if peak > 0 then db = 20 * math.log(peak, 10) end
+      out[#out + 1] = role .. "|" .. string.format("%.1f", db)
+    end
+  end
+  return table.concat(out, SEP)
+end
+
 function ops.save()
   -- An untitled project is refused rather than saved. REAPER answers a save
   -- on an untitled project with a modal file dialog, which blocks its main
