@@ -473,6 +473,27 @@ contested port on a development machine. REAPER's web interface has no
 authentication by default, so it is worth setting a password in that same
 preferences pane if your network is shared.
 
+## Language
+
+Everything the toolbox prints exists in English and Brazilian Portuguese.
+
+```sh
+CLI_LANG=pt cli studio
+```
+
+```yaml
+# ~/.config/cli/config.yaml
+lang: pt
+```
+
+The setting wins over `CLI_LANG`, which wins over the system locale — so if
+your machine is already `pt_BR`, there is nothing to configure.
+
+Console labels stay in English on purpose. `TRIM`, `PAN`, `MUTE`, `SOLO` and
+`EQ` are printed that way on the panel of every desk sold in Brazil, so
+translating them would make the layout less familiar rather than more. The
+prose that explains each control is translated in full.
+
 ## Development
 
 ```sh
@@ -488,6 +509,7 @@ Demucs required to run the suite.
 ```
 internal/
 ├── cli/        cobra command tree: the toolbox root and each tool
+├── i18n/       message catalogues, one per language
 ├── studio/     the studio domain: topology, levels, chains, sessions
 ├── daw/        what the app needs from a workstation, in studio terms
 ├── reaper/     REAPER adapter: web interface client and ReaScript bridge
