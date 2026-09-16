@@ -1,3 +1,9 @@
 bin/
 dist/
 coverage.out
+
+# Editor and OS cruft
+*.swp
+*.swo
+*~
+.DS_Store

@@ -31,6 +31,14 @@ const (
 	// bridgeTimeout bounds a single operation. Setup does the most work and
 	// still finishes well inside this.
 	bridgeTimeout = 10 * time.Second
+
+	// bridgeActionID is the command ID the bridge is registered under in
+	// reaper-kb.ini. It is fixed rather than generated so an upgrade reuses
+	// the same registration instead of accumulating duplicates.
+	bridgeActionID = "RS7c1152d9ab3e4f60"
+	// bridgeCommand invokes that action; REAPER prefixes script command IDs
+	// with an underscore.
+	bridgeCommand = "_" + bridgeActionID
 )
 
 // Adapter drives REAPER, implementing daw.DAW.
@@ -62,8 +70,9 @@ func (a *Adapter) Ping(ctx context.Context) (daw.Info, error) {
 type BridgeNotLoadedError struct{}
 
 func (e *BridgeNotLoadedError) Error() string {
-	return "REAPER is reachable but the cli-studio bridge is not running.\n\n" +
-		"  Run `cli studio install` to install it, then restart REAPER."
+	return "REAPER is reachable but the cli-studio bridge did not answer.\n\n" +
+		"  Run `cli studio install`, then restart REAPER so it picks up the\n" +
+		"  registered action."
 }
 
 // call performs one bridge operation and returns its payload.
@@ -82,6 +91,11 @@ func (a *Adapter) callWithTimeout(ctx context.Context, timeout time.Duration, op
 	payload := strings.Join(append([]string{seq, op}, args...), fieldSep)
 
 	if err := a.client.SetExtState(ctx, extSection, "req", payload); err != nil {
+		return "", fmt.Errorf("%s: %w", op, err)
+	}
+	// The bridge is a one-shot action: writing the request does nothing until
+	// REAPER is told to run it.
+	if err := a.client.RunAction(ctx, bridgeCommand); err != nil {
 		return "", fmt.Errorf("%s: %w", op, err)
 	}
 
@@ -331,14 +345,11 @@ func ResourceDir() string {
 // bridgeFileName is the installed script's name.
 const bridgeFileName = "cli-studio-bridge.lua"
 
-// startupLine loads the bridge from REAPER's startup script.
-const startupMarker = "cli-studio-bridge"
-
 // InstallReport describes what installation did.
 type InstallReport struct {
-	ScriptPath  string
-	StartupPath string
-	Actions     []string
+	ScriptPath   string
+	RegistryPath string
+	Actions      []string
 }
 
 // Install writes the bridge script into REAPER's Scripts directory and ensures
@@ -362,10 +373,7 @@ func Install() (InstallReport, error) {
 		return InstallReport{}, fmt.Errorf("creating Scripts directory: %w", err)
 	}
 
-	report := InstallReport{
-		ScriptPath:  filepath.Join(scripts, bridgeFileName),
-		StartupPath: filepath.Join(scripts, "__startup.lua"),
-	}
+	report := InstallReport{ScriptPath: filepath.Join(scripts, bridgeFileName)}
 
 	existing, err := os.ReadFile(report.ScriptPath)
 	switch {
@@ -378,34 +386,79 @@ func Install() (InstallReport, error) {
 		report.Actions = append(report.Actions, "wrote "+bridgeFileName)
 	}
 
-	loader := fmt.Sprintf("dofile(reaper.GetResourcePath() .. %q)\n",
-		string(filepath.Separator)+filepath.Join("Scripts", bridgeFileName))
+	if err := registerAction(res, &report); err != nil {
+		return report, err
+	}
+	cleanupStaleStartup(scripts, &report)
+	return report, nil
+}
 
-	current, err := os.ReadFile(report.StartupPath)
+// kbLine is the reaper-kb.ini entry that registers the bridge as a Main-section
+// action, which is what gives it an invocable command ID.
+func kbLine() string {
+	return fmt.Sprintf("SCR 4 0 %s \"Custom: cli studio bridge\" %s",
+		bridgeActionID, bridgeFileName)
+}
+
+// registerAction adds the bridge to REAPER's action registry.
+//
+// REAPER's only startup hook is __startup.eel, which cannot load a Lua file,
+// so the script is registered as an action and invoked by command ID instead.
+// REAPER reads this file at startup and rewrites it on exit, so the entry is
+// added while REAPER is closed and takes effect on the next launch.
+func registerAction(resourceDir string, report *InstallReport) error {
+	path := filepath.Join(resourceDir, "reaper-kb.ini")
+	report.RegistryPath = path
+	line := kbLine()
+
+	current, err := os.ReadFile(path)
 	switch {
 	case os.IsNotExist(err):
-		header := "-- REAPER startup script\n"
-		if err := os.WriteFile(report.StartupPath, []byte(header+loader), 0o644); err != nil {
-			return report, fmt.Errorf("writing startup script: %w", err)
+		if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
+			return fmt.Errorf("writing %s: %w", path, err)
 		}
-		report.Actions = append(report.Actions, "created __startup.lua")
+		report.Actions = append(report.Actions, "registered the bridge action")
+		return nil
 	case err != nil:
-		return report, fmt.Errorf("reading startup script: %w", err)
-	case strings.Contains(string(current), startupMarker):
-		report.Actions = append(report.Actions, "__startup.lua already loads the bridge")
-	default:
-		// Someone else's startup script: add a line, never rewrite the file.
-		appended := string(current)
-		if !strings.HasSuffix(appended, "\n") {
-			appended += "\n"
-		}
-		appended += "\n" + loader
-		if err := os.WriteFile(report.StartupPath, []byte(appended), 0o644); err != nil {
-			return report, fmt.Errorf("updating startup script: %w", err)
-		}
-		report.Actions = append(report.Actions, "appended the bridge loader to __startup.lua")
+		return fmt.Errorf("reading %s: %w", path, err)
 	}
-	return report, nil
+
+	if strings.Contains(string(current), bridgeActionID) {
+		report.Actions = append(report.Actions, "bridge action already registered")
+		return nil
+	}
+
+	// Someone else's keymap: append a line, never rewrite the file.
+	body := string(current)
+	if !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	if err := os.WriteFile(path, []byte(body+line+"\n"), 0o644); err != nil {
+		return fmt.Errorf("updating %s: %w", path, err)
+	}
+	report.Actions = append(report.Actions, "registered the bridge action")
+	return nil
+}
+
+// staleStartup is the loader an earlier version of this tool installed, before
+// it was established that REAPER has no __startup.lua hook. It never ran, so
+// it is removed rather than left to puzzle whoever finds it.
+const staleStartup = "-- REAPER startup script\ndofile(reaper.GetResourcePath() .. \"/Scripts/cli-studio-bridge.lua\")\n"
+
+func cleanupStaleStartup(scriptsDir string, report *InstallReport) {
+	path := filepath.Join(scriptsDir, "__startup.lua")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	// Only remove the file if it is exactly what this tool wrote; anything
+	// else belongs to the user.
+	if string(body) != staleStartup {
+		return
+	}
+	if err := os.Remove(path); err == nil {
+		report.Actions = append(report.Actions, "removed the unused __startup.lua")
+	}
 }
 
 // Ensure the adapter satisfies the interface the domain depends on.

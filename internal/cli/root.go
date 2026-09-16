@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"regexp"
 	"syscall"
 
 	"github.com/charmbracelet/x/term"
@@ -49,6 +50,11 @@ func Execute() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// A level argument such as "-3" is indistinguishable from a flag bundle to
+	// the flag parser, so the argument list is rewritten before it is handed
+	// over. Without this, half the studio's commands are unusable.
+	root.SetArgs(terminateFlagsBeforeNegativeNumber(os.Args[1:]))
+
 	if err := root.ExecuteContext(ctx); err != nil {
 		// A cancelled run is a deliberate user action, not a failure worth
 		// dressing up as an error.
@@ -60,6 +66,32 @@ func Execute() int {
 		return 1
 	}
 	return 0
+}
+
+// negativeNumber matches an argument that is a negative number rather than a
+// flag, e.g. "-3" or "-2.5".
+var negativeNumber = regexp.MustCompile(`^-\d+(\.\d+)?$`)
+
+// terminateFlagsBeforeNegativeNumber inserts "--" ahead of the first negative
+// number in the argument list.
+//
+// pflag offers no way to declare that a command takes numeric arguments, and
+// it reads "-2" as the shorthand flags -2. Terminating flag parsing just
+// before such an argument lets it through while leaving any flags that came
+// earlier to parse normally.
+func terminateFlagsBeforeNegativeNumber(args []string) []string {
+	for i, a := range args {
+		if a == "--" {
+			return args // the caller already terminated flag parsing
+		}
+		if negativeNumber.MatchString(a) {
+			out := make([]string, 0, len(args)+1)
+			out = append(out, args[:i]...)
+			out = append(out, "--")
+			return append(out, args[i:]...)
+		}
+	}
+	return args
 }
 
 func newRootCmd(e *env) *cobra.Command {
@@ -183,7 +215,7 @@ var flagToConfigKey = map[string]string{
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Print the dtx version",
+		Short: "Print the cli version",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ui.Println(ui.Title.Render("cli") + " " + version)

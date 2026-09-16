@@ -137,7 +137,7 @@ An existing __startup.lua is appended to, never replaced.`,
 			}
 			ui.Println()
 			ui.Println(ui.KeyValue("script", report.ScriptPath, 8))
-			ui.Println(ui.KeyValue("startup", report.StartupPath, 8))
+			ui.Println(ui.KeyValue("action", report.RegistryPath, 8))
 			ui.Println()
 			ui.Println(ui.Warning("Restart REAPER so it loads the bridge."))
 			return nil

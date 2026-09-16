@@ -20,8 +20,6 @@ local SEP = "\31" -- unit separator: cannot occur in a track name
 local TAG_ROLE = "P_EXT:clistudio.role"
 local TAG_MANAGED = "P_EXT:clistudio.managed"
 
-local POLL_SECONDS = 0.05
-
 -- Send modes. Pre-fader-post-FX is the one that matters here: cue mixes must
 -- carry the processed tone (the guitar's amp sim) while staying independent of
 -- the main fader, so moving the control-room mix never alters what a musician
@@ -336,13 +334,59 @@ function ops.snapshot(args)
 end
 
 function ops.save()
+  -- An untitled project is refused rather than saved. REAPER answers a save
+  -- on an untitled project with a modal file dialog, which blocks its main
+  -- thread and with it this web interface, hanging the caller on something
+  -- only a human at the machine can dismiss.
+  local _, name = reaper.EnumProjects(-1, "")
+  if name == nil or name == "" then
+    error("this REAPER project has never been saved; save it once in REAPER first")
+  end
   reaper.Main_OnCommand(40026, 0) -- File: Save project
   return "ok"
 end
 
--- ===== poll loop =====
+-- verify reports the routing that matters, read-only, so a configuration can
+-- be checked without changing anything.
+function ops.verify(args)
+  local out = {}
+  for _, role in ipairs(split(args[1] or "", ",")) do
+    local tr = find_managed(role)
+    if not tr then
+      out[#out + 1] = role .. "|missing"
+    else
+      local _, name = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+      local rec = reaper.GetMediaTrackInfo_Value(tr, "I_RECINPUT")
+      local chans = reaper.GetMediaTrackInfo_Value(tr, "I_NCHAN")
+      local mainsend = reaper.GetMediaTrackInfo_Value(tr, "B_MAINSEND")
 
-local last_seq = ""
+      local hw = "-"
+      if reaper.GetTrackNumSends(tr, 1) > 0 then
+        hw = tostring(math.floor(reaper.GetTrackSendInfo_Value(tr, 1, 0, "I_DSTCHAN")))
+      end
+
+      local sends = {}
+      for i = 0, reaper.GetTrackNumSends(tr, 0) - 1 do
+        local dest = reaper.GetTrackSendInfo_Value(tr, 0, i, "P_DESTTRACK")
+        local drole = "?"
+        for j = 0, reaper.CountTracks(0) - 1 do
+          local cand = reaper.GetTrack(0, j)
+          if cand == dest then drole = track_role(cand) or "?" end
+        end
+        local mode = reaper.GetTrackSendInfo_Value(tr, 0, i, "I_SENDMODE")
+        sends[#sends + 1] = drole .. "@" .. tostring(math.floor(mode))
+      end
+
+      out[#out + 1] = table.concat({
+        role, name, tostring(math.floor(rec)), tostring(math.floor(chans)),
+        tostring(math.floor(mainsend)), hw, table.concat(sends, " "),
+      }, "|")
+    end
+  end
+  return table.concat(out, SEP)
+end
+
+-- ===== poll loop =====
 
 local function handle(raw)
   local fields = split(raw, SEP)
@@ -361,15 +405,11 @@ local function handle(raw)
   return seq .. SEP .. "ok" .. SEP .. tostring(result)
 end
 
-local function poll()
-  local raw = reaper.GetExtState(SECTION, "req")
-  if raw ~= "" and raw ~= last_seq then
-    last_seq = raw
-    local response = handle(raw)
-    reaper.SetExtState(SECTION, "resp", response, false)
-  end
-  reaper.defer(poll)
+-- One shot. REAPER's only startup hook is __startup.eel, which cannot load a
+-- Lua file, so this script is registered as an action and invoked by command
+-- ID instead. REAPER reloads it on each invocation, so there is no resident
+-- loop to keep alive and nothing polling while the studio sits idle.
+local request = reaper.GetExtState(SECTION, "req")
+if request ~= "" then
+  reaper.SetExtState(SECTION, "resp", handle(request), false)
 end
-
-reaper.SetExtState(SECTION, "bridge", "ready", false)
-poll()
