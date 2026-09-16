@@ -515,11 +515,30 @@ local function eq_gain(db)
   return EQ_UNITY * (10 ^ (db / 20))
 end
 
--- set_param writes a plugin parameter by name, quietly doing nothing when the
--- plugin is absent: a strip should still set pan and fader on a channel whose
--- EQ has never been switched on.
-local function set_param(tr, tag, plugin, name, value)
+-- ensure_fx finds a tagged plugin, adding it if it is not there.
+--
+-- A mixing desk has an EQ and a compressor on every channel; they are not
+-- things you switch on. Without this, moving a tone control on a channel whose
+-- EQ had never been added updated the display and changed nothing, which is
+-- the worst way for a control to fail.
+local function ensure_fx(tr, tag, plugin)
   local idx = fx_index(tr, tag, plugin)
+  if idx >= 0 then return idx end
+  idx = reaper.TrackFX_AddByName(tr, plugin, false, 1)
+  if idx < 0 then return -1 end
+  reaper.TrackFX_SetNamedConfigParm(tr, idx, "renamed_name", tag)
+  reaper.TrackFX_SetEnabled(tr, idx, true)
+  return idx
+end
+
+-- set_param writes a plugin parameter by name.
+local function set_param(tr, tag, plugin, name, value, create)
+  local idx
+  if create then
+    idx = ensure_fx(tr, tag, plugin)
+  else
+    idx = fx_index(tr, tag, plugin)
+  end
   if idx < 0 then return false end
   for i = 0, reaper.TrackFX_GetNumParams(tr, idx) - 1 do
     local _, pname = reaper.TrackFX_GetParamName(tr, idx, i, "")
@@ -554,23 +573,31 @@ function ops.setchannel(args)
   reaper.SetMediaTrackInfo_Value(tr, "B_MUTE", muted and 1 or 0)
   reaper.SetMediaTrackInfo_Value(tr, "I_SOLO", soloed and 1 or 0)
 
-  -- The strip's tone controls are the channel's EQ, not a second one.
-  set_param(tr, "cs:eq", "ReaEQ", "Gain-High Shelf 4", eq_gain(high))
-  set_param(tr, "cs:eq", "ReaEQ", "Gain-Band 3", eq_gain(mid))
-  set_param(tr, "cs:eq", "ReaEQ", "Gain-Low Shelf", eq_gain(low))
-  set_param(tr, "cs:eq", "ReaEQ", "Global Gain", eq_gain(trim))
+  -- The strip's tone controls are the channel's EQ, not a second one. It is
+  -- created the moment a control leaves centre, and not before: a channel
+  -- nobody has touched should not collect plugins.
+  local want_eq = (high ~= 0) or (mid ~= 0) or (low ~= 0) or (trim ~= 0)
+  local has_eq = fx_index(tr, "cs:eq", "ReaEQ") >= 0
+  if want_eq or has_eq then
+    set_param(tr, "cs:eq", "ReaEQ", "Gain-High Shelf 4", eq_gain(high), true)
+    set_param(tr, "cs:eq", "ReaEQ", "Gain-Band 3", eq_gain(mid), true)
+    set_param(tr, "cs:eq", "ReaEQ", "Gain-Low Shelf", eq_gain(low), true)
+    set_param(tr, "cs:eq", "ReaEQ", "Global Gain", eq_gain(trim), true)
+  end
   -- The frequency sweep is logarithmic about a 40 Hz offset, not a plain log
   -- between its endpoints. Measured by sweeping the parameter and reading the
   -- plugin back: a plain log mapping asked for 2 kHz and produced 2.9 kHz.
-  if midfreq > 0 then
+  if midfreq > 0 and (want_eq or has_eq) then
     local offset = 40
     local lo, hi = 20 + offset, 24000 + offset
     local norm = math.log((midfreq + offset) / lo) / math.log(hi / lo)
     if norm < 0 then norm = 0 elseif norm > 1 then norm = 1 end
-    set_param(tr, "cs:eq", "ReaEQ", "Freq-Band 3", norm)
+    set_param(tr, "cs:eq", "ReaEQ", "Freq-Band 3", norm, true)
   end
 
-  set_param(tr, "cs:compressor", "ReaComp", "Threshold", db_to_scalar(comp))
+  if comp < 0 or fx_index(tr, "cs:compressor", "ReaComp") >= 0 then
+    set_param(tr, "cs:compressor", "ReaComp", "Threshold", db_to_scalar(comp), true)
+  end
   return "ok"
 end
 
