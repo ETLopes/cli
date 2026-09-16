@@ -354,6 +354,60 @@ function ops.snapshot(args)
   return table.concat(out, SEP)
 end
 
+-- fxparams lists a plugin's parameters, read-only. Plugin parameter indexes
+-- are not documented anywhere a program can consult, so they have to be
+-- discovered from the plugin itself.
+function ops.fxparams(args)
+  local tr = find_managed(args[1])
+  if not tr then error("no managed track for " .. tostring(args[1])) end
+  local idx = fx_index(tr, args[2])
+  if idx < 0 then error("plugin not on track: " .. tostring(args[2])) end
+
+  local out = {}
+  for i = 0, reaper.TrackFX_GetNumParams(tr, idx) - 1 do
+    local _, pname = reaper.TrackFX_GetParamName(tr, idx, i, "")
+    local val, minv, maxv = reaper.TrackFX_GetParam(tr, idx, i)
+    local _, fmt = reaper.TrackFX_GetFormattedParamValue(tr, idx, i, "")
+    out[#out + 1] = table.concat({
+      tostring(i), pname, string.format("%.4f", val),
+      string.format("%.2f", minv), string.format("%.2f", maxv), fmt,
+    }, "|")
+  end
+  return table.concat(out, SEP)
+end
+
+-- fxconfig probes named configuration values on a plugin. Some settings are
+-- not VST parameters and are only reachable this way.
+function ops.fxconfig(args)
+  local tr = find_managed(args[1])
+  if not tr then error("no managed track for " .. tostring(args[1])) end
+  local idx = fx_index(tr, args[2])
+  if idx < 0 then error("plugin not on track: " .. tostring(args[2])) end
+
+  local out = {}
+  for _, key in ipairs(split(args[3] or "", ",")) do
+    local ok, val = reaper.TrackFX_GetNamedConfigParm(tr, idx, key)
+    out[#out + 1] = key .. "|" .. tostring(ok) .. "|" .. tostring(val)
+  end
+  -- Also report the track's channel count, since a detector pointed at a
+  -- channel the track does not have is silent by definition.
+  out[#out + 1] = "track_nchan|true|" .. tostring(math.floor(reaper.GetMediaTrackInfo_Value(tr, "I_NCHAN")))
+  local _, inpins = reaper.TrackFX_GetIOSize(tr, idx)
+  out[#out + 1] = "fx_inpins|true|" .. tostring(inpins)
+  return table.concat(out, SEP)
+end
+
+-- setfxconfig writes a named configuration value on a plugin.
+function ops.setfxconfig(args)
+  local tr = find_managed(args[1])
+  if not tr then error("no managed track for " .. tostring(args[1])) end
+  local idx = fx_index(tr, args[2])
+  if idx < 0 then error("plugin not on track: " .. tostring(args[2])) end
+  local ok = reaper.TrackFX_SetNamedConfigParm(tr, idx, args[3], args[4])
+  local _, now = reaper.TrackFX_GetNamedConfigParm(tr, idx, args[3])
+  return tostring(ok) .. "|" .. tostring(now)
+end
+
 function ops.save()
   -- An untitled project is refused rather than saved. REAPER answers a save
   -- on an untitled project with a modal file dialog, which blocks its main
