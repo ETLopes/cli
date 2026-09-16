@@ -40,6 +40,11 @@ const (
 	KeyCookies   = Section + ".cookies_from_browser"
 )
 
+// KeyLang selects the language. It sits at the top level rather than under a
+// tool, since a person does not read one tool in Portuguese and another in
+// English.
+const KeyLang = "lang"
+
 // FileName is the config file's base name; Viper appends a supported extension.
 const FileName = "config"
 
@@ -131,6 +136,11 @@ func Bind(v *viper.Viper) {
 	for key, val := range defaults {
 		v.SetDefault(key, val)
 	}
+
+	// Empty means follow the system locale, which is what someone who has
+	// already told their machine they speak Portuguese would expect.
+	v.SetDefault(KeyLang, "")
+	_ = v.BindEnv(KeyLang)
 
 	v.SetConfigName(FileName)
 	v.AddConfigPath(Dir())

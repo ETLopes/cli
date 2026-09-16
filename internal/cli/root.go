@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/ETLopes/cli/internal/config"
+	"github.com/ETLopes/cli/internal/i18n"
 	"github.com/ETLopes/cli/internal/studio"
 	"github.com/ETLopes/cli/internal/ui"
 )
@@ -46,6 +47,13 @@ func (e *env) interactive() bool {
 // Execute runs the CLI and returns the process exit code.
 func Execute() int {
 	e := &env{v: viper.New()}
+
+	// The language has to be settled before the command tree is built. Cobra
+	// captures every Short and Long at construction, so a language chosen in
+	// PersistentPreRunE arrives too late to affect a word of the help.
+	lang, langErr := resolveLanguage()
+	i18n.Use(lang)
+
 	root := newRootCmd(e)
 
 	// Signals cancel the context so external tools are killed and partial
@@ -58,6 +66,13 @@ func Execute() int {
 	// over. Without this, half the studio's commands are unusable.
 	root.SetArgs(terminateFlagsBeforeNegativeNumber(os.Args[1:]))
 
+	// Reported here rather than thrown away, but only after the command tree
+	// exists, so --help still works when the configured language is nonsense.
+	if langErr != nil {
+		ui.Println(ui.Failure(langErr.Error()))
+		return 1
+	}
+
 	if err := root.ExecuteContext(ctx); err != nil {
 		// A cancelled run is a deliberate user action, not a failure worth
 		// dressing up as an error.
@@ -69,6 +84,46 @@ func Execute() int {
 		return 1
 	}
 	return 0
+}
+
+// resolveLanguage reads the language before anything else exists to read it
+// with: the environment, then the config file if one names a language.
+//
+// It reads the file with its own viper rather than the shared one. Binding an
+// environment variable to a key makes viper return empty for that key when the
+// variable is unset, which shadowed the config file entirely and let an
+// invalid language through unreported.
+func resolveLanguage() (i18n.Lang, error) {
+	lang := i18n.Detect()
+
+	probe := viper.New()
+	probe.SetConfigName(config.FileName)
+	probe.AddConfigPath(config.Dir())
+	// A file that cannot be read is reported properly by the ordinary load a
+	// moment later; failing twice over one problem helps nobody.
+	if err := probe.ReadInConfig(); err != nil {
+		return lang, nil
+	}
+
+	configured := probe.GetString(config.KeyLang)
+	if configured == "" {
+		return lang, nil
+	}
+	parsed, ok := i18n.Parse(configured)
+	if !ok {
+		return lang, fmt.Errorf("invalid configuration: %s must be one of: %s (got %q)",
+			config.KeyLang, langList(), configured)
+	}
+	return parsed, nil
+}
+
+// langList names the supported languages, for an error message.
+func langList() string {
+	names := make([]string, 0, len(i18n.Supported()))
+	for _, l := range i18n.Supported() {
+		names = append(names, string(l))
+	}
+	return strings.Join(names, ", ")
 }
 
 // negativeNumber matches an argument that is a negative number rather than a

@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/ETLopes/cli/internal/i18n"
 	"github.com/ETLopes/cli/internal/ui"
 )
 
@@ -33,13 +34,13 @@ func tools(e *env) []tool {
 	return []tool{
 		{
 			Name:  "dtx",
-			Short: "Turn a video into DTX-PRO drum practice tracks",
+			Short: i18n.T("tool.dtx.short"),
 			Glyph: "♪",
 			Run:   func(ctx context.Context) error { return runPrep(ctx, e, nil) },
 		},
 		{
 			Name:  "studio",
-			Short: "Drive a REAPER home studio: cue mixes, effects, monitoring",
+			Short: i18n.T("tool.studio.short"),
 			Glyph: "♫",
 			Run:   func(ctx context.Context) error { return runStudioTUI(ctx, e) },
 		},
@@ -139,7 +140,7 @@ func (m launcherModel) View() tea.View {
 	}
 
 	var b strings.Builder
-	b.WriteString("\n  " + ui.Title.Render("cli") + "  " + ui.Muted.Render("a personal toolbox"))
+	b.WriteString("\n  " + ui.Title.Render("cli") + "  " + ui.Muted.Render(i18n.T("toolbox.tagline")))
 	b.WriteString("\n\n")
 
 	nameWidth := 0
@@ -166,6 +167,6 @@ func (m launcherModel) View() tea.View {
 			ui.Muted.Render(t.Short)))
 	}
 
-	b.WriteString("\n  " + ui.Muted.Render("↑/↓ or j/k to move · enter to run · 1-9 to jump · q to quit") + "\n")
+	b.WriteString("\n  " + ui.Muted.Render(i18n.T("toolbox.launcher_keys")) + "\n")
 	return tea.NewView(b.String())
 }

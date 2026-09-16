@@ -2,6 +2,8 @@ package cli
 
 import (
 	"github.com/spf13/cobra"
+
+	"github.com/ETLopes/cli/internal/i18n"
 )
 
 // newDTXCmd builds the dtx tool: everything to do with turning a video into
@@ -13,7 +15,7 @@ import (
 func newDTXCmd(e *env) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "dtx [url]",
-		Short:   "Turn any video into DTX-PRO-ready drum practice tracks",
+		Short:   i18n.T("cmd.dtx.short"),
 		Aliases: []string{"drums"},
 		Long: `Turns a video URL into a set of WAV files a Yamaha DTX-PRO drum module
 will play: the original track, one mix per instrument removed (so you can

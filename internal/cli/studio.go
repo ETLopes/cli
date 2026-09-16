@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ETLopes/cli/internal/daw"
+	"github.com/ETLopes/cli/internal/i18n"
 	"github.com/ETLopes/cli/internal/reaper"
 	"github.com/ETLopes/cli/internal/studio"
 	"github.com/ETLopes/cli/internal/ui"
@@ -67,7 +68,7 @@ func (s *studioEnv) push(ctx context.Context, apply func(context.Context) error)
 	if err := apply(ctx); err != nil {
 		slog.Debug("workstation push failed", "error", err)
 		ui.Println(ui.Warning(firstLine(err.Error())))
-		ui.Println(ui.Muted.Render("  Saved to the session; run 'cli studio sync' once REAPER is available."))
+		ui.Println(ui.Muted.Render("  " + i18n.T("studio.saved_session")))
 		return nil
 	}
 	return nil
@@ -83,7 +84,7 @@ func firstLine(s string) string {
 func newStudioCmd(e *env) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "studio",
-		Short: "Control a REAPER-based home studio",
+		Short: i18n.T("cmd.studio.short"),
 		Long: `Drives a REAPER home studio in studio terms rather than DAW terms:
 instruments, cue mixes, effects and monitoring.
 
@@ -126,7 +127,7 @@ Run with no arguments for the interactive mixer.`,
 func newStudioInitCmd(e *env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",
-		Short: "Set up REAPER from scratch: web interface, bridge, topology",
+		Short: i18n.T("cmd.init.short"),
 		Long: `Does everything a new machine needs, in one command.
 
 REAPER's web interface is off by default and is the only way in from
@@ -210,7 +211,7 @@ func runStudioSetup(ctx context.Context, st *studioEnv) error {
 	counts := report.Counts()
 	ui.Println()
 	if !report.Changed() {
-		ui.Println(ui.Success("already set up; nothing to change"))
+		ui.Println(ui.Success(i18n.T("setup.unchanged")))
 	} else {
 		ui.Println(ui.Success(fmt.Sprintf("%d created, %d repaired, %d unchanged",
 			counts["created"], counts["repaired"], counts["unchanged"])))
@@ -244,7 +245,7 @@ An existing __startup.lua is appended to, never replaced.`,
 			ui.Println(ui.KeyValue("script", report.ScriptPath, 8))
 			ui.Println(ui.KeyValue("action", report.RegistryPath, 8))
 			ui.Println()
-			ui.Println(ui.Warning("Restart REAPER so it loads the bridge."))
+			ui.Println(ui.Warning(i18n.T("setup.restart")))
 			return nil
 		},
 	}
@@ -253,7 +254,7 @@ An existing __startup.lua is appended to, never replaced.`,
 func newStudioSetupCmd(e *env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "setup",
-		Short: "Create or repair the studio topology in REAPER",
+		Short: i18n.T("cmd.setup.short"),
 		Long: `Brings REAPER in line with the studio: one track per input, a MAIN bus
 on outputs 1/2, and four cue buses on 3/4, 5/6, 7/8 and 9/10, each fed by
 pre-fader sends from every instrument.
@@ -274,7 +275,7 @@ routing is repaired, and tracks the studio does not manage are left alone.`,
 func newStudioStatusCmd(e *env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
-		Short: "Show the connection and any drift from the session",
+		Short: i18n.T("cmd.status.short"),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := openStudio(e)
@@ -309,7 +310,7 @@ func newStudioStatusCmd(e *env) *cobra.Command {
 			diffs := daw.Diff(s.session, actual)
 			ui.Println()
 			if len(diffs) == 0 {
-				ui.Println(ui.Success("REAPER matches the session"))
+				ui.Println(ui.Success(i18n.T("studio.matches")))
 				return nil
 			}
 			ui.Println(ui.Warning(fmt.Sprintf("%d difference(s) from the session:", len(diffs))))
@@ -317,7 +318,7 @@ func newStudioStatusCmd(e *env) *cobra.Command {
 				ui.Println(ui.Muted.Render("    " + d.String()))
 			}
 			ui.Println()
-			ui.Println(ui.Muted.Render("  Run 'cli studio sync' to make REAPER match."))
+			ui.Println(ui.Muted.Render("  " + i18n.T("studio.sync_hint")))
 			return nil
 		},
 	}
@@ -336,7 +337,7 @@ func remainingLines(s string) []string {
 func newStudioCueCmd(e *env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "cue <number> <instrument> <level>",
-		Short: "Set an instrument's level in a headphone mix",
+		Short: i18n.T("cmd.cue.short"),
 		Long: `Sets how loud one instrument is in one musician's headphones.
 
 A signed level changes by that amount; an unsigned one sets it absolutely:
@@ -391,7 +392,7 @@ written with a leading "@".`,
 func newStudioMonitorCmd(e *env) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "monitor",
-		Short: "Control the control-room monitors",
+		Short: i18n.T("cmd.monitor.short"),
 		Args:  cobra.NoArgs,
 		RunE:  func(cmd *cobra.Command, args []string) error { return cmd.Help() },
 	}
@@ -459,9 +460,9 @@ with a leading "@".`,
 					return err
 				}
 				if muted {
-					ui.Println(ui.Success("monitors muted"))
+					ui.Println(ui.Success(i18n.T("monitor.muted")))
 				} else {
-					ui.Println(ui.Success("monitors unmuted"))
+					ui.Println(ui.Success(i18n.T("monitor.unmuted")))
 				}
 				return nil
 			},
@@ -657,7 +658,7 @@ func newStudioSyncCmd(e *env) *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "sync",
-		Short: "Make REAPER match the session",
+		Short: i18n.T("cmd.sync.short"),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := openStudio(e)

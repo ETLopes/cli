@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/ETLopes/cli/internal/daw"
+	"github.com/ETLopes/cli/internal/i18n"
 	"github.com/ETLopes/cli/internal/studio"
 	"github.com/ETLopes/cli/internal/ui"
 )
@@ -463,7 +464,7 @@ func (m studioModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		if !change.Changed() {
 			// Already at a limit; say so rather than appearing unresponsive.
-			m.status = r.label + " is at its limit"
+			m.status = i18n.Tf("console.limit", r.label)
 			m.statusErr = false
 			return m, nil
 		}
@@ -557,11 +558,11 @@ func (m studioModel) handleConsoleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		if err := m.studio.store.Save(m.studio.session); err != nil {
 			m.status, m.statusErr = firstLine(err.Error()), true
 		} else {
-			m.status, m.statusErr = "saved "+m.studio.session.Name, false
+			m.status, m.statusErr = i18n.Tf("console.saved", m.studio.session.Name), false
 		}
 		return m, nil
 	case "r":
-		m.status, m.statusErr = "reconnecting...", false
+		m.status, m.statusErr = i18n.T("console.connecting"), false
 		return m, m.connect()
 	case "?":
 		m.showHelp = !m.showHelp
@@ -641,7 +642,7 @@ func (m studioModel) View() tea.View {
 	if m.connected {
 		b.WriteString("   " + ui.OK.Render("● "+m.dawName))
 	} else {
-		b.WriteString("   " + ui.Err.Render("● REAPER not connected"))
+		b.WriteString("   " + ui.Err.Render("● "+i18n.T("studio.disconnected")))
 	}
 	b.WriteString("\n\n")
 
@@ -697,7 +698,7 @@ func (m studioModel) View() tea.View {
 			}
 		}
 		b.WriteString("\n  " + ui.Muted.Render(
-			"←/→ channel · ↑/↓ control · +/- adjust (shift ×4) · space toggle · ? help · tab page · s save · q quit") + "\n")
+			i18n.T("console.keys")) + "\n")
 		v := tea.NewView(b.String())
 		v.AltScreen = true
 		return v

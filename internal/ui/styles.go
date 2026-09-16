@@ -64,8 +64,11 @@ const (
 )
 
 // Banner renders the application header.
+//
+// The name is the toolbox's, not a tool's: it said "dtx" on every screen,
+// including the studio's.
 func Banner(subtitle string) string {
-	b := Title.Render("dtx")
+	b := Title.Render("cli")
 	if subtitle != "" {
 		b += "  " + Muted.Render(subtitle)
 	}

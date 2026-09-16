@@ -3,6 +3,8 @@ package studio
 import (
 	"fmt"
 	"math"
+
+	"github.com/ETLopes/cli/internal/i18n"
 )
 
 // A channel strip is what a mixing desk puts under each input: gain, tone,
@@ -206,48 +208,28 @@ func (c StripControl) IsSwitch() bool { return c == ControlMute || c == ControlS
 func (c StripControl) Explain() string {
 	switch c {
 	case ControlTrim:
-		return "Input level before anything else. Raise it if a quiet source is " +
-			"barely registering, lower it if the signal is distorting. Set this " +
-			"first: everything below reacts to what it is fed."
+		return i18n.T("ctrl.trim")
 	case ControlHigh:
-		return "Treble. Boost for air, breath and string detail; cut to tame " +
-			"harshness, cymbal splash or sibilance."
+		return i18n.T("ctrl.high")
 	case ControlMid:
-		return "The band where most instruments live, so it decides what sounds " +
-			"present and what sounds buried. Cutting here usually clears space; " +
-			"boosting brings a source forward and can sound boxy or nasal."
+		return i18n.T("ctrl.mid")
 	case ControlMidFreq:
-		return "Which frequency the MID control acts on. Sweep it while boosting " +
-			"to find the offending note, then cut there. Low hundreds is boxiness, " +
-			"around 1k is honk, 3-4k is bite and harshness."
+		return i18n.T("ctrl.midfreq")
 	case ControlLow:
-		return "Bass. Boost for weight and body; cut to remove rumble, mic thump, " +
-			"or mud where several instruments are fighting for the same low end."
+		return i18n.T("ctrl.low")
 	case ControlComp:
-		return "How hard the compressor works. It makes loud parts quieter, which " +
-			"evens out a performance and lets you raise the overall level. A little " +
-			"steadies a vocal or bass; a lot flattens dynamics and starts to pump."
+		return i18n.T("ctrl.comp")
 	case ControlPan:
-		return "Where the channel sits between the left and right speakers. " +
-			"Spreading sources apart stops them masking each other; keep bass, " +
-			"kick and lead vocal near the centre."
+		return i18n.T("ctrl.pan")
 	case ControlMute:
-		return "Silences this channel everywhere, including the headphone mixes."
+		return i18n.T("ctrl.mute")
 	case ControlSolo:
-		return "Hears this channel alone. While anything is soloed, everything " +
-			"not soloed goes quiet. Useful for finding a problem; easy to leave " +
-			"on by mistake."
+		return i18n.T("ctrl.solo")
 	case ControlFader:
-		return "The channel's level in the main mix. It does not affect the " +
-			"headphone mixes: those are taken before the fader, so you can change " +
-			"the room mix without touching what anyone is hearing."
+		return i18n.T("ctrl.fader")
 	}
 	return ""
 }
 
 // ExplainAux says what a cue send does.
-func ExplainAux(cue int) string {
-	return fmt.Sprintf("How much of this channel goes to headphone mix %d. "+
-		"Each mix is what one musician hears, independent of the others and of "+
-		"the main fader.", cue)
-}
+func ExplainAux(cue int) string { return i18n.Tf("ctrl.aux", cue) }

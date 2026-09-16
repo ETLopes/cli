@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ETLopes/cli/internal/daw"
+	"github.com/ETLopes/cli/internal/i18n"
 	"github.com/ETLopes/cli/internal/studio"
 	"github.com/ETLopes/cli/internal/ui"
 )
@@ -250,7 +251,7 @@ func abs(n int) int {
 func renderConsole(s *studio.Session, rows []consoleRow, chanIdx, rowIdx int, width int) string {
 	instruments := studio.Instruments()
 	if len(instruments) == 0 {
-		return "  no inputs configured\n"
+		return "  " + i18n.T("console.no_inputs") + "\n"
 	}
 
 	// Columns are sized to the widest thing in them, so the grid stays in
@@ -326,8 +327,8 @@ func renderConsole(s *studio.Session, rows []consoleRow, chanIdx, rowIdx int, wi
 	}
 
 	if last < len(instruments) || first > 0 {
-		b.WriteString("  " + ui.Muted.Render(fmt.Sprintf(
-			"showing %d-%d of %d inputs", first+1, last, len(instruments))) + "\n")
+		b.WriteString("  " + ui.Muted.Render(
+			i18n.Tf("console.showing", first+1, last, len(instruments))) + "\n")
 	}
 	return b.String()
 }
