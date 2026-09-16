@@ -473,6 +473,43 @@ contested port on a development machine. REAPER's web interface has no
 authentication by default, so it is worth setting a password in that same
 preferences pane if your network is shared.
 
+## Settings
+
+`cli config` opens an editor. Every setting explains itself, values are
+validated as you type, and nothing is written until you save.
+
+```
+cli  settings
+
+General
+  Language            English
+
+Studio
+  REAPER host         127.0.0.1
+  REAPER port         8765
+
+DTX practice tracks
+▸ Separation model    ‹ htdemucs — 4 stems, fastest ›
+  Compute device      auto — GPU if available
+
+  Which model splits a track into stems. Better separation costs
+  proportionally more time.
+
+  ↑/↓ setting · ←/→ change · enter edit · s save · q quit
+```
+
+Or change one from the command line:
+
+```sh
+cli config set lang pt
+cli config set studio.reaper_port 9080
+cli config show                        # what is in effect, and where from
+cli config init                        # write a file to edit by hand
+```
+
+Saving reads the existing file first, so settings the editor does not show are
+left alone.
+
 ## Language
 
 Everything the toolbox prints exists in English and Brazilian Portuguese.
