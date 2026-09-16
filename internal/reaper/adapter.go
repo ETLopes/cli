@@ -218,12 +218,20 @@ func (a *Adapter) Setup(ctx context.Context) (daw.SetupReport, error) {
 			// A track that cannot be repaired should not fail the whole setup.
 			continue
 		}
-		if adopted != "" {
-			for _, id := range strings.Split(adopted, ",") {
-				report.Actions = append(report.Actions, daw.Action{
-					Kind: "repaired", Object: in.Name + " " + id, Detail: "adopted an untagged plugin",
-				})
+		// Only names that match an effect in this instrument's chain are
+		// believed. Reporting back whatever arrived would turn any unexpected
+		// response into a list of repairs that never happened.
+		for _, id := range strings.Split(adopted, ",") {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
 			}
+			if _, known := studio.LookupEffect(in.ID, id); !known {
+				continue
+			}
+			report.Actions = append(report.Actions, daw.Action{
+				Kind: "repaired", Object: in.Name + " " + id, Detail: "adopted an untagged plugin",
+			})
 		}
 	}
 

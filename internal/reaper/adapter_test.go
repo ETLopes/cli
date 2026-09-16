@@ -414,3 +414,37 @@ func TestCompressorCarriesAWorkingThreshold(t *testing.T) {
 		t.Errorf("threshold is %.2f dB, want -18", db)
 	}
 }
+
+// The bridge's reply is not taken on trust: anything that is not a real effect
+// in that instrument's chain is ignored, so an unexpected response cannot turn
+// into a list of repairs that never happened.
+func TestAdoptIgnoresUnrecognisedNames(t *testing.T) {
+	f := newFakeREAPER()
+	f.handle = func(op string, args []string) (string, error) {
+		if op == "adopt" {
+			// One real effect, and two things that are not.
+			return "overdrive,nonsense,input 3, mono", nil
+		}
+		return "unchanged|bus MAIN|", nil
+	}
+
+	report, err := f.server(t).Setup(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, a := range report.Actions {
+		if strings.Contains(a.Object, "nonsense") || strings.Contains(a.Object, "mono") {
+			t.Errorf("an unrecognised name was reported as repaired: %q", a.Object)
+		}
+	}
+	// The real one should still be adopted, for guitar which has an overdrive.
+	var sawReal bool
+	for _, a := range report.Actions {
+		if strings.Contains(a.Object, "Guitar overdrive") {
+			sawReal = true
+		}
+	}
+	if !sawReal {
+		t.Error("a genuine adoption should still be reported")
+	}
+}
