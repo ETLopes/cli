@@ -4,10 +4,12 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"regexp"
+	"strings"
 	"syscall"
 
 	"github.com/charmbracelet/x/term"
@@ -94,17 +96,36 @@ func terminateFlagsBeforeNegativeNumber(args []string) []string {
 	return args
 }
 
+// rootDescription builds the help text from the tool list, so the tools named
+// here cannot drift from the ones the launcher offers. Keeping a second copy
+// by hand is how studio came to be missing from both.
+func rootDescription(e *env) string {
+	var b strings.Builder
+	b.WriteString(ui.Title.Render("cli"))
+	b.WriteString(` is a personal toolbox. Each tool lives under its own
+subcommand, and every tool works interactively when run without arguments.
+
+Tools:
+`)
+	width := 0
+	for _, t := range tools(e) {
+		if n := len(t.Name); n > width {
+			width = n
+		}
+	}
+	for _, t := range tools(e) {
+		fmt.Fprintf(&b, "  %-*s  %s\n", width, t.Name, t.Short)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 func newRootCmd(e *env) *cobra.Command {
 	var cfgFile string
 
 	cmd := &cobra.Command{
-		Use:   "cli",
-		Short: "A personal toolbox of day-to-day tools",
-		Long: ui.Title.Render("cli") + ` is a personal toolbox. Each tool lives under its own
-subcommand, and every tool works interactively when run without arguments.
-
-Tools:
-  dtx    turn a video into DTX-PRO-ready drum practice tracks`,
+		Use:           "cli",
+		Short:         "A personal toolbox of day-to-day tools",
+		Long:          rootDescription(e),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {

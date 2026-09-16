@@ -147,3 +147,18 @@ func TestLauncherListsEveryTool(t *testing.T) {
 		}
 	}
 }
+
+// The help text and the launcher must name the same tools; they were two
+// hand-kept lists, and both went stale the same way.
+func TestRootHelpNamesEveryTool(t *testing.T) {
+	e := &env{}
+	desc := rootDescription(e)
+	for _, tl := range tools(e) {
+		if !strings.Contains(desc, tl.Name) {
+			t.Errorf("root help does not mention the tool %q", tl.Name)
+		}
+		if !strings.Contains(desc, tl.Short) {
+			t.Errorf("root help does not describe the tool %q", tl.Name)
+		}
+	}
+}
