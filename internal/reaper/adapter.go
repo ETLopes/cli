@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -45,7 +46,29 @@ const (
 type Adapter struct {
 	client *Client
 	seq    atomic.Uint64
+
+	// gate admits one bridge call at a time. The protocol has a single
+	// request slot and a single response slot in REAPER's extended state, so
+	// two calls in flight together overwrite each other's request and the
+	// loser waits for a reply that will never come. The mixer produces
+	// exactly that whenever an arrow key is held down.
+	gateOnce sync.Once
+	gate     chan struct{}
 }
+
+// acquire takes the single-call gate, respecting cancellation so a caller that
+// gives up waiting is not left blocked.
+func (a *Adapter) acquire(ctx context.Context) error {
+	a.gateOnce.Do(func() { a.gate = make(chan struct{}, 1) })
+	select {
+	case a.gate <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (a *Adapter) release() { <-a.gate }
 
 // New returns an adapter for a REAPER web interface.
 func New(host string, port int) *Adapter {
@@ -87,6 +110,11 @@ func (a *Adapter) call(ctx context.Context, op string, args ...string) (string, 
 // callWithTimeout is call with an explicit deadline, so tests need not wait
 // the full production timeout to observe a non-responding bridge.
 func (a *Adapter) callWithTimeout(ctx context.Context, timeout time.Duration, op string, args ...string) (string, error) {
+	if err := a.acquire(ctx); err != nil {
+		return "", fmt.Errorf("%s: %w", op, err)
+	}
+	defer a.release()
+
 	seq := strconv.FormatUint(a.seq.Add(1), 10) + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	payload := strings.Join(append([]string{seq, op}, args...), fieldSep)
 

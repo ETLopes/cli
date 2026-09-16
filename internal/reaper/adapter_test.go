@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -300,5 +301,39 @@ func TestSnapshotIgnoresUnmanagedEntries(t *testing.T) {
 	cue, _ := session.Cue(1)
 	if cue.Level("guitar") != 1 {
 		t.Errorf("cue 1 guitar = %v, want 1", cue.Level("guitar"))
+	}
+}
+
+// The bridge protocol shares one request slot and one response slot in
+// REAPER's extended state. Concurrent calls -- which the mixer produces every
+// time an arrow key is held -- must not overwrite each other's request before
+// it has been answered.
+func TestConcurrentCallsDoNotInterfere(t *testing.T) {
+	f := newFakeREAPER()
+	f.handle = func(op string, args []string) (string, error) {
+		if len(args) > 0 {
+			return args[0], nil // echo the argument so a mix-up is visible
+		}
+		return "ok", nil
+	}
+	a := f.server(t)
+
+	const n = 12
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = a.callWithTimeout(context.Background(), 3*time.Second,
+				"setmonvol", strconv.Itoa(i))
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("concurrent call %d failed: %v", i, err)
+		}
 	}
 }

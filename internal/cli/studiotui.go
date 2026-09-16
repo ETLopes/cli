@@ -84,10 +84,24 @@ type studioModel struct {
 	statusErr bool
 	quitting  bool
 	width     int
+
+	// Bridge calls are serialised, so a held arrow key would otherwise queue
+	// one call per keypress and the mixer would keep moving long after the
+	// key came up. Instead one push per row is in flight at a time and later
+	// changes are collapsed into a single follow-up, which sends the value
+	// the user actually settled on.
+	pushing map[string]bool
+	dirty   map[string]bool
+	rows    map[string]row
 }
 
 func newStudioModel(ctx context.Context, s *studioEnv) studioModel {
-	m := studioModel{ctx: ctx, studio: s, width: 90}
+	m := studioModel{
+		ctx: ctx, studio: s, width: 90,
+		pushing: map[string]bool{},
+		dirty:   map[string]bool{},
+		rows:    map[string]row{},
+	}
 	m.rebuild()
 	return m
 }
@@ -177,6 +191,11 @@ func (m *studioModel) rebuild() {
 	tabs = append(tabs, mon)
 
 	m.tabs = tabs
+	for _, t := range tabs {
+		for _, r := range t.rows {
+			m.rows[r.label] = r
+		}
+	}
 }
 
 type connectedMsg struct {
@@ -209,11 +228,20 @@ func (m studioModel) pushRow(r row) tea.Cmd {
 	if !m.connected || r.sync == nil {
 		return nil
 	}
+	// Already sending this row: note that it moved again and let the in-flight
+	// call finish. The follow-up reads the value live, so it sends wherever
+	// the row ended up rather than replaying every intermediate step.
+	if m.pushing[r.label] {
+		m.dirty[r.label] = true
+		return nil
+	}
+	m.pushing[r.label] = true
+
 	s := m.studio
 	ctx := m.ctx
 	label := r.label
 	return func() tea.Msg {
-		c, cancel := context.WithTimeout(ctx, 3*time.Second)
+		c, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		return syncedMsg{label: label, err: r.sync(c, s.dawc)}
 	}
@@ -241,9 +269,16 @@ func (m studioModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case syncedMsg:
+		m.pushing[msg.label] = false
 		if msg.err != nil {
 			m.status = msg.label + ": " + firstLine(msg.err.Error())
 			m.statusErr = true
+		}
+		if m.dirty[msg.label] {
+			m.dirty[msg.label] = false
+			if r, ok := m.rows[msg.label]; ok {
+				return m, m.pushRow(r)
+			}
 		}
 		return m, nil
 
