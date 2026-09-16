@@ -317,3 +317,53 @@ func TestConsoleLabelRoundTrips(t *testing.T) {
 		t.Error("a malformed label should not resolve")
 	}
 }
+
+// A value the application would refuse on next run should be refused now,
+// while the person is still looking at the thing they typed.
+func TestConfigSetValidatesBeforeWriting(t *testing.T) {
+	for _, tc := range []struct {
+		key, value string
+		wantErr    bool
+		mentions   string
+	}{
+		{"lang", "pt", false, ""},
+		{"lang", "en", false, ""},
+		{"lang", "pt-BR", false, ""},
+		{"lang", "klingon", true, "Português"},
+		{"studio.reaper_port", "9080", false, ""},
+		{"studio.reaper_port", "99999", true, "65535"},
+		{"studio.reaper_port", "abc", true, "65535"},
+		{"dtx.model", "htdemucs_ft", false, ""},
+		{"dtx.model", "nonsense", true, "htdemucs"},
+		{"dtx.device", "cuda", false, ""},
+		{"dtx.device", "quantum", true, "auto, cpu"},
+		// A key with no rule is written as given rather than blocked.
+		{"studio.session", "rehearsal", false, ""},
+	} {
+		err := validateSetting(tc.key, tc.value)
+		if tc.wantErr && err == nil {
+			t.Errorf("%s=%s should have been refused", tc.key, tc.value)
+		}
+		if !tc.wantErr && err != nil {
+			t.Errorf("%s=%s should be accepted, got: %v", tc.key, tc.value, err)
+		}
+		if tc.mentions != "" && err != nil && !strings.Contains(err.Error(), tc.mentions) {
+			t.Errorf("error for %s=%s should mention %q, got: %v",
+				tc.key, tc.value, tc.mentions, err)
+		}
+	}
+}
+
+// Numbers and booleans must not reach the file as quoted strings, or they fail
+// to parse as the type the setting expects.
+func TestConfigSetKeepsTypes(t *testing.T) {
+	if got := typedValue("9080"); got != 9080 {
+		t.Errorf("typedValue(\"9080\") = %#v, want the number", got)
+	}
+	if got := typedValue("true"); got != true {
+		t.Errorf("typedValue(\"true\") = %#v, want the boolean", got)
+	}
+	if got := typedValue("pt"); got != "pt" {
+		t.Errorf("typedValue(\"pt\") = %#v, want the string", got)
+	}
+}
