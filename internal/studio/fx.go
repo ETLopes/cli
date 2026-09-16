@@ -208,7 +208,7 @@ func HasChain(instrumentID string) bool {
 // topology order.
 func InstrumentsWithChains() []string {
 	var out []string
-	for _, in := range instruments {
+	for _, in := range current.Instruments {
 		if HasChain(in.ID) {
 			out = append(out, in.ID)
 		}

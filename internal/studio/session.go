@@ -3,6 +3,7 @@ package studio
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -46,6 +47,10 @@ type Session struct {
 	cues    map[int]*CueMix
 	// fx maps instrument ID to effect ID to enabled.
 	fx map[string]map[string]bool
+	// Warnings records what was dropped while loading, so a session written
+	// against a different rig can still be opened and the loss reported
+	// rather than hidden.
+	Warnings []string
 	// tunings holds pitch-correction settings per instrument and effect.
 	// These are not a plugin's incidental state: which notes are legal and
 	// how fast the voice is dragged onto them is the whole sound.
@@ -68,8 +73,8 @@ func NewSession(name string) *Session {
 	}
 
 	for _, bus := range CueBuses() {
-		levels := make(map[string]Level, len(instruments))
-		for _, in := range instruments {
+		levels := make(map[string]Level, len(current.Instruments))
+		for _, in := range current.Instruments {
 			// Unity is the useful starting point for a rehearsal: everyone
 			// hears everyone, and mixes are dialled in from there.
 			levels[in.ID] = Unity
@@ -77,7 +82,7 @@ func NewSession(name string) *Session {
 		s.cues[bus.CueID] = &CueMix{ID: bus.CueID, levels: levels}
 	}
 
-	for _, in := range instruments {
+	for _, in := range current.Instruments {
 		enabled := make(map[string]bool)
 		tuned := make(map[string]Tuning)
 		for _, e := range Chain(in.ID) {
@@ -268,6 +273,42 @@ func unknownInstrument(id string) error {
 
 // --- persistence ---
 
+// sortedKeys gives map iteration a stable order, so warnings read the same
+// way every time a file is opened.
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func sortedCueIDs[V any](m map[int]V) []int {
+	out := make([]int, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Ints(out)
+	return out
+}
+
+// joinInts renders cue numbers for a warning.
+func joinInts(v []int) string {
+	parts := make([]string, len(v))
+	for i, n := range v {
+		parts[i] = fmt.Sprint(n)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func firstSentence(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
 // file is the on-disk shape. It is separate from Session so the stored format
 // stays a deliberate choice rather than a side effect of internal fields.
 type file struct {
@@ -339,15 +380,29 @@ func Unmarshal(data []byte) (*Session, error) {
 	}
 	s.monitor = Monitor{Volume: monitor, Muted: f.Monitor.Muted}
 
-	for cueID, levels := range f.Cues {
+	// A session may have been written against a different rig -- the inputs
+	// and outputs are configurable, so cues and instruments come and go. What
+	// no longer exists is dropped and reported, because refusing to open the
+	// file would leave no way forward but deleting it.
+	// Collected rather than reported one by one: a rig with six inputs
+	// removed would otherwise print a wall of near-identical lines every time
+	// a command ran.
+	droppedInputs := map[string]bool{}
+	var droppedCues []int
+
+	for _, cueID := range sortedCueIDs(f.Cues) {
+		levels := f.Cues[cueID]
 		cue, err := s.Cue(cueID)
 		if err != nil {
-			return nil, fmt.Errorf("reading session: %w", err)
+			droppedCues = append(droppedCues, cueID)
+			continue
 		}
-		for instID, raw := range levels {
+		for _, instID := range sortedKeys(levels) {
+			raw := levels[instID]
 			in, ok := LookupInstrument(instID)
 			if !ok {
-				return nil, fmt.Errorf("reading session: cue %d: %w", cueID, unknownInstrument(instID))
+				droppedInputs[instID] = true
+				continue
 			}
 			lvl := Level(raw)
 			if err := ValidateSend(lvl); err != nil {
@@ -357,12 +412,22 @@ func Unmarshal(data []byte) (*Session, error) {
 		}
 	}
 
-	for instID, effects := range f.FX {
-		for effID, on := range effects {
-			// An unknown effect is reported rather than dropped, so a rename
-			// upstream surfaces instead of silently disabling processing.
-			if err := s.SetEffect(instID, effID, on); err != nil {
-				return nil, fmt.Errorf("reading session: %w", err)
+	if len(droppedCues) > 0 {
+		s.Warnings = append(s.Warnings, fmt.Sprintf(
+			"session has %d cue mix(es) this studio does not: %s",
+			len(droppedCues), joinInts(droppedCues)))
+	}
+	if len(droppedInputs) > 0 {
+		s.Warnings = append(s.Warnings, fmt.Sprintf(
+			"session has %d input(s) this studio does not: %s",
+			len(droppedInputs), strings.Join(sortedKeys(droppedInputs), ", ")))
+	}
+
+	droppedFX := 0
+	for _, instID := range sortedKeys(f.FX) {
+		for _, effID := range sortedKeys(f.FX[instID]) {
+			if err := s.SetEffect(instID, effID, f.FX[instID][effID]); err != nil {
+				droppedFX++
 			}
 		}
 	}

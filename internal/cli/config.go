@@ -100,8 +100,17 @@ func newConfigInitCmd(e *env) *cobra.Command {
 			}
 
 			// Settings are nested under the tool's section so other tools
-			// can add their own without colliding.
-			body, err := yaml.Marshal(map[string]any{config.Section: e.cfg})
+			// can add their own without colliding. The studio's rig is
+			// written out in full, so changing which instrument is on which
+			// input is editing a file rather than rebuilding.
+			type studioFile struct {
+				config.Studio       `yaml:",inline"`
+				config.TopologyFile `yaml:",inline"`
+			}
+			body, err := yaml.Marshal(map[string]any{
+				config.Section:       e.cfg,
+				config.StudioSection: studioFile{e.studio, config.DefaultTopologyFile()},
+			})
 			if err != nil {
 				return fmt.Errorf("encoding config: %w", err)
 			}

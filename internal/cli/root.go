@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/ETLopes/cli/internal/config"
+	"github.com/ETLopes/cli/internal/studio"
 	"github.com/ETLopes/cli/internal/ui"
 )
 
@@ -182,6 +183,16 @@ func (e *env) setup(cmd *cobra.Command, cfgFile string) error {
 		return err
 	}
 	e.studio = studioCfg
+
+	// The rig is installed before any command runs, so every one of them sees
+	// the same inputs and outputs the user described.
+	topology, err := config.LoadTopology(e.v)
+	if err != nil {
+		return err
+	}
+	if err := studio.Use(topology); err != nil {
+		return err
+	}
 
 	level := slog.LevelWarn
 	if e.verbose {

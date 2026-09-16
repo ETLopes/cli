@@ -272,20 +272,51 @@ Keyboard and DTX are mono, as wired. The topology lives in
 
 ## Setup
 
-REAPER's web interface is how a program outside REAPER reaches it:
+From a fresh REAPER, with REAPER **closed**:
 
-1. **Preferences → Control/OSC/web → Add → Web browser interface**, port `8765`
-2. `cli studio install` — installs the bridge script and registers it
-3. Restart REAPER
-4. `cli studio setup` — creates the tracks, buses and routing
+```sh
+cli studio init     # enables the web interface, installs the bridge
+# start REAPER
+cli studio init     # builds the tracks, buses and routing
+```
 
-`setup` is safe to re-run. It reuses what exists, repairs routing that has
-drifted, and never touches tracks it does not manage. Managed objects are
-tagged, so renaming or reordering tracks in REAPER does not detach them.
+REAPER's web interface is off by default and is the only way in from outside,
+so the first run switches it on by editing REAPER's own configuration. That
+file is rewritten when REAPER exits, which is why REAPER has to be closed for
+it. Any control surface already configured is kept, not replaced.
 
-Why a bridge script: REAPER's web interface can read and write state but
-cannot create tracks or assign hardware inputs, while ReaScript can do both
-but is unreachable from outside REAPER. The bridge closes the gap.
+The second run needs REAPER open, and is the same work `cli studio setup`
+does: it reuses what exists, repairs routing that has drifted, and never
+touches tracks it does not manage. Managed objects are tagged, so renaming or
+reordering tracks in REAPER does not detach them.
+
+Why a bridge script at all: REAPER's web interface can read and write state
+but cannot create tracks or assign hardware inputs, while ReaScript can do
+both but is unreachable from outside REAPER. The bridge closes the gap.
+
+## Describing a different rig
+
+The inputs and outputs above are defaults, not assumptions. `cli config init`
+writes them out to edit:
+
+```yaml
+studio:
+  inputs:
+    - {id: mic1,   name: Mic 1,   channel: 1}
+    - {id: guitar, name: Guitar,  channel: 3}
+    - {id: keys,   name: Keys,    channel: 5, mode: stereo}
+  outputs:
+    main: [1, 2]
+    cues: [[3, 4], [5, 6]]
+```
+
+`id` is what commands use (`cli studio cue 1 keys +3`), `channel` counts from
+1, and `mode` defaults to mono — a stereo input claims the next channel too.
+Cue mixes are numbered in the order listed.
+
+A rig is checked before it is used: two inputs on one channel, or two buses on
+one output, is refused rather than discovered through the speakers. A session
+written against a different rig still opens, reporting what it had to drop.
 
 ## Cue mixes
 

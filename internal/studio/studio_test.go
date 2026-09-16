@@ -41,7 +41,7 @@ func TestTopologyMatchesTheRig(t *testing.T) {
 }
 
 func TestBusOutputsMatchTheInterface(t *testing.T) {
-	if got := MainBus.Output.String(); got != "1/2" {
+	if got := MainBus().Output.String(); got != "1/2" {
 		t.Errorf("MAIN feeds %s, want 1/2 (the monitors)", got)
 	}
 	want := map[int]string{1: "3/4", 2: "5/6", 3: "7/8", 4: "9/10"}
@@ -448,21 +448,6 @@ func TestUnmarshalRejectsUnsafeValues(t *testing.T) {
 			"session:\n  name: x\nmonitor:\n  volume: 12\n",
 			"out of range",
 		},
-		{
-			"unknown instrument",
-			"session:\n  name: x\ncues:\n  1:\n    trombone: 0\n",
-			"unknown instrument",
-		},
-		{
-			"unknown cue",
-			"session:\n  name: x\ncues:\n  9:\n    guitar: 0\n",
-			"cue 9",
-		},
-		{
-			"unknown effect",
-			"session:\n  name: x\nfx:\n  guitar:\n    bagpipes: true\n",
-			"no effect",
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -478,6 +463,55 @@ func TestUnmarshalRejectsUnsafeValues(t *testing.T) {
 }
 
 // A partial file is a normal way to work; anything unmentioned keeps defaults.
+// The rig is configurable, so a session written against a different one must
+// still open. What no longer exists is dropped and reported, because refusing
+// the file would leave no way forward but deleting it.
+func TestUnmarshalDropsEntriesTheRigNoLongerHas(t *testing.T) {
+	original := Current()
+	t.Cleanup(func() { _ = Use(original) })
+
+	two := Topology{
+		Instruments: []Instrument{{ID: "vox", Name: "Vox", Input: 1, Mode: Mono}},
+		Main:        Bus{ID: "main", Name: "MAIN", Output: OutputPair{1, 2}},
+		Cues:        []Bus{{ID: "cue1", Name: "CUE 1", Output: OutputPair{3, 4}, CueID: 1}},
+	}
+	if err := Use(two); err != nil {
+		t.Fatal(err)
+	}
+
+	// Written when the studio had four cues and a guitar.
+	s, err := Unmarshal([]byte("session:\n  name: old\ncues:\n  1:\n    vox: -2\n  4:\n    guitar: 3\n"))
+	if err != nil {
+		t.Fatalf("a session from another rig should still open: %v", err)
+	}
+	if len(s.Warnings) != 1 {
+		t.Fatalf("warnings = %v, want one about the missing cue", s.Warnings)
+	}
+	// Assert the substance, not the phrasing.
+	if !strings.Contains(s.Warnings[0], "cue") || !strings.Contains(s.Warnings[0], "4") {
+		t.Errorf("warning %q should say a cue mix numbered 4 was dropped", s.Warnings[0])
+	}
+	// What the rig still has must survive.
+	cue, err := s.Cue(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cue.Level("vox") != -2 {
+		t.Errorf("cue 1 vox = %v, want -2 to have survived", cue.Level("vox"))
+	}
+}
+
+// A level outside the safe range is a different matter: that is unsafe rather
+// than merely stale, and is still refused.
+func TestUnmarshalStillRefusesUnsafeLevels(t *testing.T) {
+	if _, err := Unmarshal([]byte("session:\n  name: x\ncues:\n  1:\n    guitar: 40\n")); err == nil {
+		t.Error("a send far above the ceiling should be refused")
+	}
+	if _, err := Unmarshal([]byte("session:\n  name: x\nmonitor:\n  volume: 12\n")); err == nil {
+		t.Error("a monitor level above unity should be refused")
+	}
+}
+
 func TestUnmarshalFillsDefaults(t *testing.T) {
 	s, err := Unmarshal([]byte("session:\n  name: quick\ncues:\n  1:\n    guitar: 3\n"))
 	if err != nil {
@@ -550,5 +584,87 @@ func TestAbsolutePositiveStillWorks(t *testing.T) {
 	}
 	if adj.Relative || adj.Delta != 3 {
 		t.Errorf("@3 = %+v, want absolute 3", adj)
+	}
+}
+
+// A different rig must be describable without a rebuild, and a bad one must be
+// refused before it can route audio anywhere surprising.
+func TestTopologyCanBeReplaced(t *testing.T) {
+	original := Current()
+	t.Cleanup(func() { _ = Use(original) })
+
+	small := Topology{
+		Instruments: []Instrument{
+			{ID: "vox", Name: "Vox", Input: 1, Mode: Mono},
+			{ID: "keys", Name: "Keys", Input: 3, Mode: Stereo},
+		},
+		Main: Bus{ID: "main", Name: "MAIN", Output: OutputPair{1, 2}},
+		Cues: []Bus{{ID: "cue1", Name: "CUE 1", Output: OutputPair{3, 4}, CueID: 1}},
+	}
+	if err := Use(small); err != nil {
+		t.Fatalf("a valid topology was rejected: %v", err)
+	}
+	if got := len(Instruments()); got != 2 {
+		t.Errorf("got %d instruments, want 2", got)
+	}
+	if got := CueCount(); got != 1 {
+		t.Errorf("got %d cues, want 1", got)
+	}
+	if _, ok := LookupInstrument("keys"); !ok {
+		t.Error("the replacement topology's instruments should resolve")
+	}
+	// A stereo instrument claims the next input too.
+	in, _ := LookupInstrument("keys")
+	if got := in.Channels(); len(got) != 2 || got[1] != 4 {
+		t.Errorf("stereo keys occupies %v, want channels 3 and 4", got)
+	}
+}
+
+func TestBadTopologiesAreRefused(t *testing.T) {
+	main := Bus{ID: "main", Name: "MAIN", Output: OutputPair{1, 2}}
+	for _, tc := range []struct {
+		name string
+		top  Topology
+		want string
+	}{
+		{"no inputs", Topology{Main: main}, "at least one input"},
+		{
+			"two instruments on one input",
+			Topology{Main: main, Instruments: []Instrument{
+				{ID: "a", Input: 1, Mode: Mono}, {ID: "b", Input: 1, Mode: Mono},
+			}},
+			"input 1 is claimed",
+		},
+		{
+			"stereo instrument overlapping the next input",
+			Topology{Main: main, Instruments: []Instrument{
+				{ID: "a", Input: 3, Mode: Stereo}, {ID: "b", Input: 4, Mode: Mono},
+			}},
+			"input 4 is claimed",
+		},
+		{
+			"bus colliding with the monitors",
+			Topology{Main: main,
+				Instruments: []Instrument{{ID: "a", Input: 1, Mode: Mono}},
+				Cues:        []Bus{{ID: "cue1", Output: OutputPair{1, 2}, CueID: 1}}},
+			"output 1 is claimed",
+		},
+		{
+			"duplicate instrument id",
+			Topology{Main: main, Instruments: []Instrument{
+				{ID: "a", Input: 1, Mode: Mono}, {ID: "a", Input: 2, Mode: Mono},
+			}},
+			"duplicate instrument id",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.top.Validate()
+			if err == nil {
+				t.Fatalf("expected %s to be refused", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want it to mention %q", err, tc.want)
+			}
+		})
 	}
 }

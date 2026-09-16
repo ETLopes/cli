@@ -40,6 +40,12 @@ func openStudio(e *env) (*studioEnv, error) {
 		session = studio.NewSession(name)
 	}
 
+	// Anything the session lost on load is reported once, here, rather than
+	// left in a field nobody reads.
+	for _, w := range session.Warnings {
+		ui.Println(ui.Warning(w))
+	}
+
 	return &studioEnv{
 		env:     e,
 		store:   store,
@@ -97,6 +103,7 @@ Run with no arguments for the interactive mixer.`,
 	}
 
 	cmd.AddCommand(
+		newStudioInitCmd(e),
 		newStudioInstallCmd(e),
 		newStudioSetupCmd(e),
 		newStudioStatusCmd(e),
@@ -113,6 +120,102 @@ Run with no arguments for the interactive mixer.`,
 	}
 	cmd.AddCommand(newStudioMicCmd(e))
 	return cmd
+}
+
+// newStudioInitCmd walks a fresh machine through everything at once.
+func newStudioInitCmd(e *env) *cobra.Command {
+	return &cobra.Command{
+		Use:   "init",
+		Short: "Set up REAPER from scratch: web interface, bridge, topology",
+		Long: `Does everything a new machine needs, in one command.
+
+REAPER's web interface is off by default and is the only way in from
+outside, so it is switched on by editing REAPER's configuration directly.
+That file is rewritten when REAPER exits, so REAPER must be closed.
+
+Afterwards, start REAPER and run this again to build the topology.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			port := e.studio.ReaperPort
+
+			st, err := openStudio(e)
+			if err != nil {
+				return err
+			}
+
+			// Already working: go straight to the topology and skip the rest.
+			if _, pingErr := st.dawc.Ping(ctx); pingErr == nil {
+				ui.Println(ui.Success("REAPER is reachable and the bridge is loaded"))
+				return runStudioSetup(ctx, st)
+			}
+
+			ui.Println(ui.Banner("first-run setup"))
+			ui.Println()
+
+			if reaper.IsREAPERRunning() {
+				ui.Println(ui.Warning("REAPER is running."))
+				ui.Println(ui.Muted.Render(
+					"  It rewrites its configuration on exit, so a change made now would be lost."))
+				ui.Println(ui.Muted.Render("  Quit REAPER, run 'cli studio init' again, then start it."))
+				return nil
+			}
+
+			web, err := reaper.EnableWebInterface(port)
+			if err != nil {
+				return err
+			}
+			if web.AlreadyEnabled {
+				ui.Println(ui.Success(fmt.Sprintf("web interface already enabled on port %d", port)))
+			} else {
+				ui.Println(ui.Success(fmt.Sprintf("enabled the web interface on port %d", port)))
+				if web.Existing > 0 {
+					ui.Println(ui.Muted.Render(fmt.Sprintf(
+						"  kept the %d control surface(s) already configured", web.Existing)))
+				}
+			}
+
+			report, err := reaper.Install()
+			if err != nil {
+				return err
+			}
+			for _, a := range report.Actions {
+				ui.Println(ui.Success(a))
+			}
+
+			ui.Println()
+			ui.Println(ui.Heading.Render("  Next: start REAPER, then run 'cli studio init' again."))
+			ui.Println(ui.Muted.Render("  That second run builds the tracks, buses and routing."))
+			return nil
+		},
+	}
+}
+
+// runStudioSetup builds the topology and reports what changed.
+func runStudioSetup(ctx context.Context, st *studioEnv) error {
+	report, err := st.dawc.Setup(ctx)
+	if err != nil {
+		return err
+	}
+	for _, a := range report.Actions {
+		switch a.Kind {
+		case "created":
+			ui.Println(ui.Success(a.Object) + ui.Muted.Render("  "+a.Detail))
+		case "repaired":
+			ui.Println(ui.Warning(a.Object) + ui.Muted.Render("  "+a.Detail))
+		default:
+			ui.Println(ui.Muted.Render("  " + ui.GlyphPending + " " + a.Object))
+		}
+	}
+	counts := report.Counts()
+	ui.Println()
+	if !report.Changed() {
+		ui.Println(ui.Success("already set up; nothing to change"))
+	} else {
+		ui.Println(ui.Success(fmt.Sprintf("%d created, %d repaired, %d unchanged",
+			counts["created"], counts["repaired"], counts["unchanged"])))
+	}
+	return st.store.Save(st.session)
 }
 
 func newStudioInstallCmd(e *env) *cobra.Command {
@@ -159,35 +262,11 @@ Safe to run repeatedly. Existing managed objects are reused, incorrect
 routing is repaired, and tracks the studio does not manage are left alone.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStudio(e)
+			st, err := openStudio(e)
 			if err != nil {
 				return err
 			}
-			report, err := s.dawc.Setup(cmd.Context())
-			if err != nil {
-				return err
-			}
-
-			for _, a := range report.Actions {
-				switch a.Kind {
-				case "created":
-					ui.Println(ui.Success(a.Object) + ui.Muted.Render("  "+a.Detail))
-				case "repaired":
-					ui.Println(ui.Warning(a.Object) + ui.Muted.Render("  "+a.Detail))
-				default:
-					ui.Println(ui.Muted.Render("  " + ui.GlyphPending + " " + a.Object))
-				}
-			}
-
-			counts := report.Counts()
-			ui.Println()
-			if !report.Changed() {
-				ui.Println(ui.Success("already set up; nothing to change"))
-			} else {
-				ui.Println(ui.Success(fmt.Sprintf("%d created, %d repaired, %d unchanged",
-					counts["created"], counts["repaired"], counts["unchanged"])))
-			}
-			return s.store.Save(s.session)
+			return runStudioSetup(cmd.Context(), st)
 		},
 	}
 }
