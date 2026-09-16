@@ -25,6 +25,7 @@ var version = "dev"
 type env struct {
 	v       *viper.Viper
 	cfg     config.Config
+	studio  config.Studio
 	verbose bool
 	// plain disables the live terminal view, either because the user asked or
 	// because stdout is not a terminal.
@@ -99,7 +100,7 @@ Tools:
 	pf.BoolVar(&e.plain, "plain", false, "disable the live progress view")
 	pf.BoolVarP(&e.assumeYes, "yes", "y", false, "assume yes for prompts; never prompt interactively")
 
-	cmd.AddCommand(newDTXCmd(e), newConfigCmd(e), newVersionCmd())
+	cmd.AddCommand(newDTXCmd(e), newStudioCmd(e), newConfigCmd(e), newVersionCmd())
 	return cmd
 }
 
@@ -107,6 +108,7 @@ Tools:
 // command.
 func (e *env) setup(cmd *cobra.Command, cfgFile string) error {
 	config.Bind(e.v)
+	config.BindStudio(e.v)
 	if cfgFile != "" {
 		e.v.SetConfigFile(cfgFile)
 	}
@@ -121,6 +123,12 @@ func (e *env) setup(cmd *cobra.Command, cfgFile string) error {
 		return err
 	}
 	e.cfg = cfg
+
+	studioCfg, err := config.LoadStudio(e.v)
+	if err != nil {
+		return err
+	}
+	e.studio = studioCfg
 
 	level := slog.LevelWarn
 	if e.verbose {

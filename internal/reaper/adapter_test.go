@@ -1,0 +1,304 @@
+package reaper
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/ETLopes/cli/internal/studio"
+)
+
+// fakeREAPER emulates the web interface plus a bridge that answers requests,
+// so the wire protocol can be exercised without REAPER running.
+type fakeREAPER struct {
+	mu    sync.Mutex
+	state map[string]string
+	// handle produces the bridge's payload for an operation. Returning an
+	// error makes the bridge reply with an err response.
+	handle func(op string, args []string) (string, error)
+	// deaf makes the bridge ignore requests, as if the script were not loaded.
+	deaf  bool
+	calls []string
+}
+
+func newFakeREAPER() *fakeREAPER {
+	return &fakeREAPER{
+		state:  map[string]string{},
+		handle: func(string, []string) (string, error) { return "ok", nil },
+	}
+}
+
+func (f *fakeREAPER) server(t *testing.T) *Adapter {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(f.serve))
+	t.Cleanup(srv.Close)
+
+	a := &Adapter{client: &Client{BaseURL: srv.URL, HTTP: srv.Client()}}
+	return a
+}
+
+func (f *fakeREAPER) serve(w http.ResponseWriter, r *http.Request) {
+	raw := strings.TrimPrefix(r.URL.EscapedPath(), "/_/")
+	for _, cmd := range strings.Split(raw, ";") {
+		decoded, err := url.PathUnescape(cmd)
+		if err != nil {
+			decoded = cmd
+		}
+		parts := strings.Split(decoded, "/")
+
+		f.mu.Lock()
+		switch {
+		case parts[0] == "TRANSPORT":
+			w.Write([]byte("TRANSPORT\t0\t0.0\t0\t1.1.00\n"))
+		case parts[0] == "SET" && parts[1] == "EXTSTATE" && len(parts) >= 5:
+			key := parts[3]
+			value := strings.Join(parts[4:], "/")
+			f.state[key] = value
+			if key == "req" && !f.deaf {
+				f.respond(value)
+			}
+		case parts[0] == "GET" && parts[1] == "EXTSTATE" && len(parts) >= 4:
+			w.Write([]byte("EXTSTATE\t" + parts[2] + "\t" + parts[3] + "\t" + f.state[parts[3]] + "\n"))
+		}
+		f.mu.Unlock()
+	}
+}
+
+// respond runs the fake bridge. The caller holds the lock.
+func (f *fakeREAPER) respond(request string) {
+	fields := strings.Split(request, fieldSep)
+	if len(fields) < 2 {
+		return
+	}
+	seq, op, args := fields[0], fields[1], fields[2:]
+	f.calls = append(f.calls, op+"("+strings.Join(args, ",")+")")
+
+	payload, err := f.handle(op, args)
+	if err != nil {
+		f.state["resp"] = seq + fieldSep + "err" + fieldSep + err.Error()
+		return
+	}
+	f.state["resp"] = seq + fieldSep + "ok" + fieldSep + payload
+}
+
+func (f *fakeREAPER) called() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.calls...)
+}
+
+func TestPingReportsREAPER(t *testing.T) {
+	f := newFakeREAPER()
+	f.handle = func(op string, _ []string) (string, error) {
+		if op != "ping" {
+			t.Errorf("unexpected op %q", op)
+		}
+		return "REAPER 7.80/OSX64", nil
+	}
+
+	info, err := f.server(t).Ping(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info.Name != "REAPER" || !strings.Contains(info.Version, "7.80") {
+		t.Errorf("info = %+v, want REAPER 7.80", info)
+	}
+}
+
+// REAPER answering while the script is absent is a different problem from
+// REAPER being unreachable, and must be reported as such.
+func TestBridgeNotLoadedIsDistinct(t *testing.T) {
+	f := newFakeREAPER()
+	f.deaf = true
+	a := f.server(t)
+
+	// Shorten the wait so the test does not sit for the full timeout.
+	_, err := a.callWithTimeout(context.Background(), 200*time.Millisecond, "ping")
+	var notLoaded *BridgeNotLoadedError
+	if !errors.As(err, &notLoaded) {
+		t.Fatalf("error = %v (%T), want BridgeNotLoadedError", err, err)
+	}
+	if !strings.Contains(err.Error(), "cli studio install") {
+		t.Errorf("error should say how to fix it, got: %v", err)
+	}
+}
+
+// A response left behind by an earlier run must never be read as this one's.
+func TestStaleResponseIsIgnored(t *testing.T) {
+	f := newFakeREAPER()
+	f.state["resp"] = "999-old" + fieldSep + "ok" + fieldSep + "stale payload"
+	f.deaf = true
+	a := f.server(t)
+
+	_, err := a.callWithTimeout(context.Background(), 200*time.Millisecond, "ping")
+	if err == nil {
+		t.Fatal("a stale response should not satisfy a new request")
+	}
+	if strings.Contains(err.Error(), "stale payload") {
+		t.Errorf("stale payload leaked into the result: %v", err)
+	}
+}
+
+func TestBridgeErrorsSurface(t *testing.T) {
+	f := newFakeREAPER()
+	f.handle = func(string, []string) (string, error) {
+		return "", errors.New("no managed track for guitar")
+	}
+	err := f.server(t).SetMonitorMute(context.Background(), true)
+	if err == nil {
+		t.Fatal("expected the bridge error to surface")
+	}
+	if !strings.Contains(err.Error(), "no managed track") {
+		t.Errorf("error = %v, want the bridge's message", err)
+	}
+}
+
+func TestSetupSendsFullTopology(t *testing.T) {
+	f := newFakeREAPER()
+	var gotInstruments, gotBuses string
+	f.handle = func(op string, args []string) (string, error) {
+		if op == "setup" && len(args) == 2 {
+			gotInstruments, gotBuses = args[0], args[1]
+		}
+		return "created|track Guitar|input 3, mono" + fieldSep + "unchanged|bus MAIN|", nil
+	}
+
+	report, err := f.server(t).Setup(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, want := range []string{"guitar:Guitar:3", "dtx:DTX:7", "mic1:Mic 1:1"} {
+		if !strings.Contains(gotInstruments, want) {
+			t.Errorf("instrument spec missing %q; got %q", want, gotInstruments)
+		}
+	}
+	// Buses are sent as zero-based left channels: MAIN on 0 (outputs 1/2),
+	// cue 1 on 2 (outputs 3/4).
+	for _, want := range []string{"main:MAIN:0", "cue1:CUE 1:2", "cue4:CUE 4:8"} {
+		if !strings.Contains(gotBuses, want) {
+			t.Errorf("bus spec missing %q; got %q", want, gotBuses)
+		}
+	}
+
+	if len(report.Actions) != 2 {
+		t.Fatalf("got %d actions, want 2", len(report.Actions))
+	}
+	if report.Actions[0].Kind != "created" || report.Actions[0].Object != "track Guitar" {
+		t.Errorf("action = %+v", report.Actions[0])
+	}
+	if !report.Changed() {
+		t.Error("a report containing a creation should count as changed")
+	}
+}
+
+func TestSetupReportUnchangedIsNotChanged(t *testing.T) {
+	f := newFakeREAPER()
+	f.handle = func(string, []string) (string, error) {
+		return "unchanged|track Guitar|" + fieldSep + "unchanged|bus MAIN|", nil
+	}
+	report, err := f.server(t).Setup(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if report.Changed() {
+		t.Error("a report of only unchanged actions should not count as changed")
+	}
+}
+
+func TestSetSendLevelAddressesTheRightObjects(t *testing.T) {
+	f := newFakeREAPER()
+	a := f.server(t)
+
+	if err := a.SetSendLevel(context.Background(), 2, "guitar", 3); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	calls := f.called()
+	if len(calls) != 1 || !strings.HasPrefix(calls[0], "setsend(cue2,guitar,3.00") {
+		t.Errorf("call = %v, want setsend(cue2,guitar,3.00)", calls)
+	}
+
+	if err := a.SetSendLevel(context.Background(), 9, "guitar", 0); err == nil {
+		t.Error("cue 9 does not exist and should be refused before any call")
+	}
+	if err := a.SetSendLevel(context.Background(), 1, "trombone", 0); err == nil {
+		t.Error("an unknown instrument should be refused before any call")
+	}
+}
+
+// The adapter sends the plugin name, since that is what REAPER can look up.
+func TestSetEffectSendsThePluginName(t *testing.T) {
+	f := newFakeREAPER()
+	a := f.server(t)
+	if err := a.SetEffect(context.Background(), "guitar", "overdrive", true); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	eff, _ := studio.LookupEffect("guitar", "overdrive")
+	if got := f.called(); len(got) != 1 || !strings.Contains(got[0], eff.Plugin) {
+		t.Errorf("call = %v, want the plugin %q", got, eff.Plugin)
+	}
+}
+
+func TestSnapshotReadsStateBack(t *testing.T) {
+	f := newFakeREAPER()
+	f.handle = func(op string, _ []string) (string, error) {
+		if op != "snapshot" {
+			return "ok", nil
+		}
+		return strings.Join([]string{
+			"send|cue1|guitar|3.00",
+			"send|cue1|bass|-2.00",
+			"monvol|-6.00",
+			"monmute|0",
+			"fx|guitar|JS: Distortion|1",
+		}, fieldSep), nil
+	}
+
+	session, err := f.server(t).Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cue, _ := session.Cue(1)
+	if cue.Level("guitar") != 3 {
+		t.Errorf("cue 1 guitar = %v, want 3", cue.Level("guitar"))
+	}
+	if cue.Level("bass") != -2 {
+		t.Errorf("cue 1 bass = %v, want -2", cue.Level("bass"))
+	}
+	if m := session.Monitor(); m.Volume != -6 || m.Muted {
+		t.Errorf("monitor = %+v, want -6 dB unmuted", m)
+	}
+	if !session.EffectEnabled("guitar", "overdrive") {
+		t.Error("overdrive should be read back as enabled")
+	}
+}
+
+// REAPER holds plugins the studio does not manage; their presence is normal.
+func TestSnapshotIgnoresUnmanagedEntries(t *testing.T) {
+	f := newFakeREAPER()
+	f.handle = func(op string, _ []string) (string, error) {
+		if op != "snapshot" {
+			return "ok", nil
+		}
+		return strings.Join([]string{
+			"fx|guitar|Some Third Party Reverb|1",
+			"send|cue1|guitar|1.00",
+			"nonsense",
+			"",
+		}, fieldSep), nil
+	}
+	session, err := f.server(t).Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("unmanaged entries should not fail the read: %v", err)
+	}
+	cue, _ := session.Cue(1)
+	if cue.Level("guitar") != 1 {
+		t.Errorf("cue 1 guitar = %v, want 1", cue.Level("guitar"))
+	}
+}
