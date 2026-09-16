@@ -111,6 +111,7 @@ Run with no arguments for the interactive mixer.`,
 	for _, id := range studio.InstrumentsWithChains() {
 		cmd.AddCommand(newStudioFXCmd(e, id))
 	}
+	cmd.AddCommand(newStudioMicCmd(e))
 	return cmd
 }
 
@@ -401,36 +402,68 @@ func newStudioFXCmd(e *env, instrumentID string) *cobra.Command {
 		Args:      cobra.ExactArgs(2),
 		ValidArgs: studio.EffectIDs(instrumentID),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			enabled, err := parseOnOff(args[1])
-			if err != nil {
-				return err
-			}
-			s, err := openStudio(e)
-			if err != nil {
-				return err
-			}
-			if err := s.session.SetEffect(instrumentID, args[0], enabled); err != nil {
-				return err
-			}
-			eff, _ := studio.LookupEffect(instrumentID, args[0])
-			slog.Info("effect", "instrument", instrumentID, "effect", eff.ID, "enabled", enabled)
+			return toggleEffect(cmd.Context(), e, instrumentID, args[0], args[1])
+		},
+	}
+}
 
-			if err := s.push(cmd.Context(), func(ctx context.Context) error {
-				if err := s.dawc.SetEffect(ctx, instrumentID, eff.ID, enabled); err != nil {
-					return err
-				}
-				// A corrector switched on with nothing configured would sit
-				// at the plugin's defaults, which correct so gently as to be
-				// inaudible. Apply the stored tuning with it.
-				if t, ok := s.session.Tuning(instrumentID, eff.ID); ok && enabled {
-					return s.dawc.SetTuning(ctx, instrumentID, eff.ID, t)
-				}
-				return nil
-			}); err != nil {
-				return err
+// toggleEffect switches one effect and pushes the change, applying the
+// effect's stored settings when it is switched on.
+func toggleEffect(ctx context.Context, e *env, instrumentID, effectID, state string) error {
+	enabled, err := parseOnOff(state)
+	if err != nil {
+		return err
+	}
+	s, err := openStudio(e)
+	if err != nil {
+		return err
+	}
+	in, _ := studio.LookupInstrument(instrumentID)
+	if err := s.session.SetEffect(instrumentID, effectID, enabled); err != nil {
+		return err
+	}
+	eff, _ := studio.LookupEffect(instrumentID, effectID)
+	slog.Info("effect", "instrument", instrumentID, "effect", eff.ID, "enabled", enabled)
+
+	if err := s.push(ctx, func(ctx context.Context) error {
+		if err := s.dawc.SetEffect(ctx, instrumentID, eff.ID, enabled); err != nil {
+			return err
+		}
+		// A corrector switched on with nothing configured sits at defaults
+		// that correct too gently to notice, so its settings go with it.
+		if t, ok := s.session.Tuning(instrumentID, eff.ID); ok && enabled {
+			return s.dawc.SetTuning(ctx, instrumentID, eff.ID, t)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	ui.Println(ui.Success(fmt.Sprintf("%s %s: %s", in.Name, eff.Name, onOffLabel(enabled))))
+	if t, ok := s.session.Tuning(instrumentID, eff.ID); ok && enabled {
+		ui.Println(ui.Muted.Render("  snaps to: " + strings.Join(t.Notes(), " ")))
+	}
+	return nil
+}
+
+// newStudioMicCmd accepts the microphone number as its own word, so
+// `cli studio mic 1 t-pain on` works alongside `cli studio mic1 t-pain on`.
+func newStudioMicCmd(e *env) *cobra.Command {
+	return &cobra.Command{
+		Use:   "mic <1|2> <effect> <on|off>",
+		Short: "Toggle an effect on a microphone",
+		Long: `The microphone number as a separate word.
+
+  cli studio mic 1 t-pain on     obvious, robotic pitch snapping
+  cli studio mic 1 t-pain off
+  cli studio mic 2 reverb on`,
+		Args: cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id := "mic" + strings.TrimSpace(args[0])
+			if _, ok := studio.LookupInstrument(id); !ok {
+				return fmt.Errorf("there is no microphone %q; the studio has mic 1 and mic 2", args[0])
 			}
-			ui.Println(ui.Success(fmt.Sprintf("%s %s: %s", in.Name, eff.Name, onOffLabel(enabled))))
-			return nil
+			return toggleEffect(cmd.Context(), e, id, args[1], args[2])
 		},
 	}
 }
@@ -529,6 +562,9 @@ Constraining to a key forces bigger, deliberate leaps.
 		},
 	}
 
+	// Hidden. Turning the effect on should be the whole interface; these are
+	// here for the rare case of needing to move off the defaults.
+	cmd.Hidden = true
 	cmd.Flags().StringVar(&effect, "effect", "hardtune", "which corrector to configure (hardtune, autotune)")
 	cmd.Flags().StringVar(&key, "key", "A", "root note ("+strings.Join(studio.Keys(), " ")+")")
 	cmd.Flags().StringVar(&scale, "scale", "minor", "scale ("+strings.Join(studio.ScaleIDs(), ", ")+")")

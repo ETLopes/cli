@@ -371,8 +371,10 @@ func TestUnconfigurableEffectsExplainThemselves(t *testing.T) {
 	for _, in := range Instruments() {
 		for _, e := range Chain(in.ID) {
 			if e.ID == "hardtune" || e.ID == "autotune" {
-				if e.NeedsSetup == "" {
-					t.Errorf("%s %s needs setup notes", in.ID, e.ID)
+				// Correction is configured by this program now, so these
+				// must answer to the name a person would actually use.
+				if len(e.Aliases) == 0 && e.ID == "hardtune" {
+					t.Errorf("%s hardtune should have an alias", in.ID)
 				}
 			}
 			if e.ID == "amp" && !e.NeedsIR {

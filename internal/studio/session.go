@@ -84,7 +84,11 @@ func NewSession(name string) *Session {
 			enabled[e.ID] = e.DefaultOn
 			switch e.ID {
 			case "hardtune":
-				tuned[e.ID] = HardTune("A", "minor")
+				// Minor pentatonic by default: five legal notes instead of
+				// seven means wider gaps, so the voice is forced further on
+				// every snap and the effect is unmistakable without anyone
+				// having to choose a scale.
+				tuned[e.ID] = HardTune("A", "pentatonicminor")
 			case "autotune":
 				tuned[e.ID] = NaturalTune("A", "minor")
 			}

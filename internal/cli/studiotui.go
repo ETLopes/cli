@@ -235,8 +235,6 @@ func effectNote(e studio.Effect) string {
 	switch {
 	case e.NeedsIR:
 		return "loads clean until you load a cab impulse response"
-	case e.NeedsSetup != "":
-		return "needs one-time setup in its window"
 	}
 	return ""
 }

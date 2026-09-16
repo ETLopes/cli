@@ -30,13 +30,14 @@ type Effect struct {
 	// audibly doing its job, and are applied only on creation so later
 	// adjustments are never overwritten.
 	Initial []ParamDefault
+	// Aliases are other names this effect answers to, so an effect can be
+	// asked for by the name people actually use for it rather than the one
+	// that describes what it does.
+	Aliases []string
 	// NeedsIR marks a convolution effect that stays transparent until an
 	// impulse response is loaded, so the interface can say so rather than
 	// leaving the player wondering why an amp changed nothing.
 	NeedsIR bool
-	// NeedsSetup describes a one-time configuration this program cannot
-	// perform, empty when there is none.
-	NeedsSetup string
 	// ShowsUI marks an effect whose whole purpose is its display. A tuner
 	// processes nothing audible; enabling it without opening its window
 	// accomplishes nothing a player can use, so the window is opened with it
@@ -142,8 +143,10 @@ func vocalChain() []Effect {
 		{ID: "compressor", Name: "Compressor", Label: "CMP", Plugin: "ReaComp",
 			Initial: []ParamDefault{{Name: "Threshold", Value: DBScalar(-18)}}},
 		{ID: "deesser", Name: "De-esser", Label: "DES", Plugin: "JS: De-esser"},
-		{ID: "autotune", Name: "Auto-Tune", Label: "AUTO", Plugin: "ReaTune", ShowsUI: true, NeedsSetup: correctionSetup},
-		{ID: "hardtune", Name: "Hard Tune", Label: "HARD", Plugin: "ReaTune", ShowsUI: true, NeedsSetup: hardTuneSetup},
+		{ID: "autotune", Name: "Pitch Correction", Label: "AUTO", Plugin: "ReaTune",
+			Aliases: []string{"pitchfix"}},
+		{ID: "hardtune", Name: "Hard Tune", Label: "HARD", Plugin: "ReaTune",
+			Aliases: []string{"t-pain", "tpain", "robot"}},
 		{ID: "harmony", Name: "Harmony", Label: "HARM", Plugin: "ReaPitch"},
 		{ID: "eq", Name: "EQ", Label: "EQ", Plugin: "ReaEQ"},
 		{ID: "delay", Name: "Delay", Label: "DLY", Plugin: "JS: Delay w/Tempo Length"},
@@ -169,12 +172,18 @@ func Chain(instrumentID string) []Effect {
 	return append([]Effect(nil), chains[normalizeID(instrumentID)]...)
 }
 
-// LookupEffect finds an effect within an instrument's chain.
+// LookupEffect finds an effect within an instrument's chain, by ID, display
+// name or alias.
 func LookupEffect(instrumentID, effectID string) (Effect, bool) {
 	want := normalizeID(effectID)
 	for _, e := range chains[normalizeID(instrumentID)] {
 		if normalizeID(e.ID) == want || normalizeID(e.Name) == want {
 			return e, true
+		}
+		for _, a := range e.Aliases {
+			if normalizeID(a) == want {
+				return e, true
+			}
 		}
 	}
 	return Effect{}, false
