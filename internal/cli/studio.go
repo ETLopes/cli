@@ -211,8 +211,11 @@ func newStudioStatusCmd(e *env) *cobra.Command {
 			info, err := s.dawc.Ping(cmd.Context())
 			if err != nil {
 				ui.Println(ui.Failure(firstLine(err.Error())))
-				ui.Println()
-				ui.Println(ui.Muted.Render(indentLines(err.Error())))
+				// Rendered a line at a time: styling a multi-line block pads
+				// every line to the widest, leaving trailing whitespace.
+				for _, line := range remainingLines(err.Error()) {
+					ui.Println(ui.Muted.Render(line))
+				}
 				return nil
 			}
 			ui.Println(ui.Success("connected to " + info.Name + " " + info.Version))
@@ -239,13 +242,14 @@ func newStudioStatusCmd(e *env) *cobra.Command {
 	}
 }
 
-// indentLines indents every line but the first, for multi-line guidance.
-func indentLines(s string) string {
-	lines := strings.Split(strings.TrimSpace(s), "\n")
+// remainingLines returns everything after the first line, for guidance that
+// follows a one-line summary.
+func remainingLines(s string) []string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
 	if len(lines) <= 1 {
-		return ""
+		return nil
 	}
-	return strings.Join(lines[1:], "\n")
+	return lines[1:]
 }
 
 func newStudioCueCmd(e *env) *cobra.Command {

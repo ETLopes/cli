@@ -19,8 +19,15 @@ import (
 	"time"
 )
 
-// DefaultPort is REAPER's stock web interface port.
-const DefaultPort = 8080
+// DefaultPort is the port this tool expects REAPER's web interface on.
+//
+// It is deliberately not REAPER's own default of 8080. That is the most
+// contested port on a development machine -- proxies, container runtimes and
+// app servers all reach for it -- and a collision surfaces here as a
+// confusing "REAPER not connected" rather than an obvious port clash. 8765 is
+// registered to a search product that has not shipped since 2010, so nothing
+// modern competes for it.
+const DefaultPort = 8765
 
 // DefaultTimeout bounds a single request. REAPER services the web interface on
 // its main thread, so a modal dialog or a busy render can stall it; failing is
@@ -57,8 +64,11 @@ type NotReachableError struct {
 func (e *NotReachableError) Error() string {
 	return fmt.Sprintf("cannot reach REAPER at %s: %v\n\n"+
 		"  Check that REAPER is running, then enable:\n"+
-		"    Preferences → Control/OSC/web → Add → Web browser interface",
-		e.BaseURL, e.Err)
+		"    Preferences → Control/OSC/web → Add → Web browser interface\n"+
+		"  and set its port to %d.\n\n"+
+		"  Using a different port? Set it with:\n"+
+		"    CLI_STUDIO_REAPER_PORT=<port>   (or studio.reaper_port in the config file)",
+		e.BaseURL, e.Err, DefaultPort)
 }
 
 func (e *NotReachableError) Unwrap() error { return e.Err }
