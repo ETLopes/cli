@@ -102,6 +102,7 @@ Run with no arguments for the interactive mixer.`,
 		newStudioStatusCmd(e),
 		newStudioCueCmd(e),
 		newStudioMonitorCmd(e),
+		newStudioTuneCmd(e),
 		newStudioSyncCmd(e),
 		newStudioSessionCmd(e),
 	)
@@ -415,7 +416,16 @@ func newStudioFXCmd(e *env, instrumentID string) *cobra.Command {
 			slog.Info("effect", "instrument", instrumentID, "effect", eff.ID, "enabled", enabled)
 
 			if err := s.push(cmd.Context(), func(ctx context.Context) error {
-				return s.dawc.SetEffect(ctx, instrumentID, eff.ID, enabled)
+				if err := s.dawc.SetEffect(ctx, instrumentID, eff.ID, enabled); err != nil {
+					return err
+				}
+				// A corrector switched on with nothing configured would sit
+				// at the plugin's defaults, which correct so gently as to be
+				// inaudible. Apply the stored tuning with it.
+				if t, ok := s.session.Tuning(instrumentID, eff.ID); ok && enabled {
+					return s.dawc.SetTuning(ctx, instrumentID, eff.ID, t)
+				}
+				return nil
 			}); err != nil {
 				return err
 			}
@@ -440,6 +450,92 @@ func onOffLabel(b bool) string {
 		return "ON"
 	}
 	return "OFF"
+}
+
+// newStudioTuneCmd configures a pitch-correction effect.
+func newStudioTuneCmd(e *env) *cobra.Command {
+	var key, scale, effect string
+	var retune int
+	var depth float64
+	var hard bool
+
+	cmd := &cobra.Command{
+		Use:   "tune <instrument>",
+		Short: "Configure pitch correction on a vocal",
+		Long: `Sets how pitch correction behaves: which notes it may snap to, and how
+long it takes to get there.
+
+Retune speed is the whole effect. At 250 ms the voice glides between notes
+and the correction is inaudible. At 0 ms it jumps, and that jump is what
+makes the processing obvious.
+
+The scale matters as much. Chromatic leaves every semitone legal, so a voice
+only ever moves to the nearest one -- a small, unremarkable correction.
+Constraining to a key forces bigger, deliberate leaps.
+
+  cli studio tune mic1 --hard --key A --scale minor
+  cli studio tune mic1 --effect autotune --retune 40
+  cli studio tune mic1 --key C --scale pentatonicminor --retune 0`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			st, err := openStudio(e)
+			if err != nil {
+				return err
+			}
+			in, ok := studio.LookupInstrument(args[0])
+			if !ok {
+				return fmt.Errorf("unknown instrument %q", args[0])
+			}
+
+			current, ok := st.session.Tuning(in.ID, effect)
+			if !ok {
+				return fmt.Errorf("%s has no tunable effect %q (try: %s)",
+					in.ID, effect, strings.Join(st.session.TunableEffects(in.ID), ", "))
+			}
+
+			// A preset sets everything at once; explicit flags then refine it,
+			// so --hard --retune 20 does what it looks like.
+			if hard {
+				current = studio.HardTune(current.Key, current.Scale)
+			}
+			if cmd.Flags().Changed("key") {
+				current.Key = key
+			}
+			if cmd.Flags().Changed("scale") {
+				current.Scale = scale
+			}
+			if cmd.Flags().Changed("retune") {
+				current.RetuneMs = retune
+			}
+			if cmd.Flags().Changed("depth") {
+				current.Depth = depth / 100
+			}
+			current.Enabled = true
+
+			if err := st.session.SetTuning(in.ID, effect, current); err != nil {
+				return err
+			}
+			slog.Info("tuning", "instrument", in.ID, "effect", effect,
+				"key", current.Key, "scale", current.Scale, "retune_ms", current.RetuneMs)
+
+			if err := st.push(cmd.Context(), func(ctx context.Context) error {
+				return st.dawc.SetTuning(ctx, in.ID, effect, current)
+			}); err != nil {
+				return err
+			}
+			ui.Println(ui.Success(fmt.Sprintf("%s %s: %s", in.Name, effect, current.Describe())))
+			ui.Println(ui.Muted.Render("  snaps to: " + strings.Join(current.Notes(), " ")))
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&effect, "effect", "hardtune", "which corrector to configure (hardtune, autotune)")
+	cmd.Flags().StringVar(&key, "key", "A", "root note ("+strings.Join(studio.Keys(), " ")+")")
+	cmd.Flags().StringVar(&scale, "scale", "minor", "scale ("+strings.Join(studio.ScaleIDs(), ", ")+")")
+	cmd.Flags().IntVar(&retune, "retune", 0, "retune speed in ms; 0 snaps instantly")
+	cmd.Flags().Float64Var(&depth, "depth", 100, "wet mix percent; below 100 blends untouched voice back in")
+	cmd.Flags().BoolVar(&hard, "hard", false, "the aggressive preset: instant retune, fully wet")
+	return cmd
 }
 
 func newStudioSyncCmd(e *env) *cobra.Command {

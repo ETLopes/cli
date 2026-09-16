@@ -252,6 +252,33 @@ func (a *Adapter) SetEffect(ctx context.Context, instrumentID, effectID string, 
 	return err
 }
 
+// SetTuning writes a pitch-correction setting into the plugin's state.
+//
+// Depth rides the Wet parameter, which is one of the three ReaTune does
+// expose. Anything under full wet blends untouched voice back in, which is
+// exactly what softens the snap, so an aggressive preset must be fully wet.
+func (a *Adapter) SetTuning(ctx context.Context, instrumentID, effectID string, t studio.Tuning) error {
+	in, ok := studio.LookupInstrument(instrumentID)
+	if !ok {
+		return fmt.Errorf("unknown instrument %q", instrumentID)
+	}
+	eff, ok := studio.LookupEffect(in.ID, effectID)
+	if !ok {
+		return fmt.Errorf("%s has no effect %q", in.ID, effectID)
+	}
+	chunk, err := TuningChunk(t)
+	if err != nil {
+		return err
+	}
+	if _, err := a.call(ctx, "setfxconfig", roleOf(in.ID), effectTag(eff.ID),
+		"vst_chunk", chunk); err != nil {
+		return err
+	}
+	_, err = a.call(ctx, "setfxparam", roleOf(in.ID), effectTag(eff.ID),
+		"Wet", strconv.FormatFloat(t.Depth, 'f', 4, 64))
+	return err
+}
+
 // SetMonitorVolume sets the control-room level.
 func (a *Adapter) SetMonitorVolume(ctx context.Context, level studio.Level) error {
 	_, err := a.call(ctx, "setmonvol", strconv.FormatFloat(float64(level), 'f', 2, 64))

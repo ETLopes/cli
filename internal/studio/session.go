@@ -46,6 +46,10 @@ type Session struct {
 	cues    map[int]*CueMix
 	// fx maps instrument ID to effect ID to enabled.
 	fx map[string]map[string]bool
+	// tunings holds pitch-correction settings per instrument and effect.
+	// These are not a plugin's incidental state: which notes are legal and
+	// how fast the voice is dragged onto them is the whole sound.
+	tunings map[string]map[string]Tuning
 }
 
 // NewSession builds a session with safe defaults.
@@ -60,6 +64,7 @@ func NewSession(name string) *Session {
 		monitor: Monitor{Volume: SafeStartupLevel, Muted: true},
 		cues:    make(map[int]*CueMix, CueCount()),
 		fx:      make(map[string]map[string]bool),
+		tunings: make(map[string]map[string]Tuning),
 	}
 
 	for _, bus := range CueBuses() {
@@ -74,12 +79,64 @@ func NewSession(name string) *Session {
 
 	for _, in := range instruments {
 		enabled := make(map[string]bool)
+		tuned := make(map[string]Tuning)
 		for _, e := range Chain(in.ID) {
 			enabled[e.ID] = e.DefaultOn
+			switch e.ID {
+			case "hardtune":
+				tuned[e.ID] = HardTune("A", "minor")
+			case "autotune":
+				tuned[e.ID] = NaturalTune("A", "minor")
+			}
 		}
 		s.fx[in.ID] = enabled
+		s.tunings[in.ID] = tuned
 	}
 	return s
+}
+
+// Tuning returns the pitch-correction setting for one effect.
+func (s *Session) Tuning(instrumentID, effectID string) (Tuning, bool) {
+	in, ok := LookupInstrument(instrumentID)
+	if !ok {
+		return Tuning{}, false
+	}
+	t, ok := s.tunings[in.ID][normalizeID(effectID)]
+	return t, ok
+}
+
+// SetTuning records a pitch-correction setting.
+func (s *Session) SetTuning(instrumentID, effectID string, t Tuning) error {
+	in, ok := LookupInstrument(instrumentID)
+	if !ok {
+		return unknownInstrument(instrumentID)
+	}
+	if _, ok := LookupEffect(in.ID, effectID); !ok {
+		return fmt.Errorf("%s has no effect %q", in.ID, effectID)
+	}
+	if err := t.Validate(); err != nil {
+		return fmt.Errorf("%s %s: %w", in.ID, effectID, err)
+	}
+	if s.tunings[in.ID] == nil {
+		s.tunings[in.ID] = make(map[string]Tuning)
+	}
+	s.tunings[in.ID][normalizeID(effectID)] = t
+	return nil
+}
+
+// TunableEffects lists the effects on an instrument that carry a tuning.
+func (s *Session) TunableEffects(instrumentID string) []string {
+	in, ok := LookupInstrument(instrumentID)
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, e := range Chain(in.ID) {
+		if _, ok := s.tunings[in.ID][e.ID]; ok {
+			out = append(out, e.ID)
+		}
+	}
+	return out
 }
 
 // Monitor returns the control-room state.
