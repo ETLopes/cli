@@ -10,6 +10,7 @@ subcommand and works interactively when run without arguments.
 | Tool | What it does |
 |---|---|
 | `cli dtx` | Turn any video into practice tracks a Yamaha DTX-PRO drum module will play |
+| `cli studio` | Drive a REAPER home studio: cue mixes, effects and monitoring |
 
 ## Install
 
@@ -236,6 +237,170 @@ several dB quieter than the source. Demucs stems sum back to the original
 recording, so a straight sum is the faithful result. Reach for `--limit` if a
 particular track clips.
 
+---
+
+# cli studio
+
+Drives a REAPER-based home studio in studio terms rather than DAW terms:
+instruments, headphone mixes, effects and monitoring. One track per physical
+input, and headphone mixes built from sends off those tracks, so changing the
+control-room mix never alters what a musician hears.
+
+```
+$ cli studio
+
+  STUDIO  rehearsal   ● REAPER 7.80/macOS-arm64
+
+   1 CUE 1  2 CUE 2  3 CUE 3  4 CUE 4  5 FX  6 MONITOR
+
+   ▸ Mic 1       +1 dB    ────────┆──┃──────────
+     Guitar      +3 dB    ────────┆────┃────────
+     Bass        -2 dB    ──────┃─┆──────────────
+```
+
+## The rig it assumes
+
+| | |
+|---|---|
+| Interface | Focusrite Scarlett 18i20 |
+| Monitors | Yamaha HS5 on outputs 1/2 |
+| Headphone amp | Mackie HM-800, four aux inputs on outputs 3/4, 5/6, 7/8, 9/10 |
+| Inputs | Mic 1, Mic 2, Guitar, Bass, Keyboard on 1–5; DTX drums on 7 |
+
+Keyboard and DTX are mono, as wired. The topology lives in
+`internal/studio/topology.go`; changing the rig is an edit there.
+
+## Setup
+
+REAPER's web interface is how a program outside REAPER reaches it:
+
+1. **Preferences → Control/OSC/web → Add → Web browser interface**, port `8765`
+2. `cli studio install` — installs the bridge script and registers it
+3. Restart REAPER
+4. `cli studio setup` — creates the tracks, buses and routing
+
+`setup` is safe to re-run. It reuses what exists, repairs routing that has
+drifted, and never touches tracks it does not manage. Managed objects are
+tagged, so renaming or reordering tracks in REAPER does not detach them.
+
+Why a bridge script: REAPER's web interface can read and write state but
+cannot create tracks or assign hardware inputs, while ReaScript can do both
+but is unreachable from outside REAPER. The bridge closes the gap.
+
+## Cue mixes
+
+A cue mix is what one musician hears. Sends are **pre-fader post-FX**, so they
+carry the processed tone while staying independent of the main fader.
+
+```sh
+cli studio cue 1 guitar +3      three decibels louder
+cli studio cue 1 bass -2        two decibels quieter
+cli studio cue 2 guitar 0       set to unity
+cli studio cue 3 keyboard @-6   set to exactly -6 dB
+cli studio cue 1 dtx off        silence it
+```
+
+A signed level changes by that amount; unsigned is absolute. Since `-6` already
+means "six quieter", an exact negative level is written `@-6`.
+
+## Effects
+
+Each instrument has a pedalboard in signal order — tuner first on a clean
+signal, dynamics and dirt before the amp, modulation and time after it.
+
+```sh
+cli studio guitar overdrive on
+cli studio bass compressor on
+cli studio mic 1 t-pain on
+```
+
+| Instrument | Chain |
+|---|---|
+| Guitar | tuner · wah · octave ± · comp · overdrive · fuzz · saturation · clipper · gate · amp · EQ · chorus · flanger · phaser · tremolo · delay · ping-pong · reverb |
+| Bass | tuner · gate · octave down · comp · 1175 · Major Tom · drive · saturation · clipper · amp · low boost · chorus · EQ |
+| Mic 1 & 2 | tuner · gate · comp · de-esser · pitch correction · hard tune · harmony · EQ · delay · reverb · vocoder |
+| Keyboard | comp · saturation · EQ · chorus · delay · lo-fi delay · reverb |
+| DTX | gate · drum comp · EQ · room reverb |
+
+Everything starts off. Effects load with settings that actually do something —
+compressors open at −18 dB rather than REAPER's default 0 dBFS threshold, where
+nothing ever crosses it.
+
+Two exceptions worth knowing: the **amp** is a convolution modeler and stays
+clean until you load a cabinet impulse response, and the **tuner** needs a
+window size around 50 ms for voice or 100 ms for bass (a low E at 41 Hz does
+not fit enough cycles in the stock 30 ms to be detected at all).
+
+### Hard pitch correction
+
+`hardtune` produces obvious, robotic pitch snapping, and answers to the alias
+`t-pain` after the production style it imitates:
+
+```sh
+cli studio mic 1 t-pain on
+cli studio mic 1 t-pain off
+```
+
+Switching it on configures everything: instant retune, fully wet, snapped to
+A minor pentatonic. Five legal notes rather than twelve means wider gaps, so
+the voice is forced further on every correction — that gap is the effect.
+
+ReaTune exposes only three automatable parameters, so these settings are
+written directly into the plugin's state blob. If a song is in another key:
+
+```sh
+cli studio tune mic1 --key C          # hidden; the defaults cover most cases
+```
+
+## Monitoring
+
+```sh
+cli studio monitor volume -3
+cli studio monitor volume @-20
+cli studio monitor mute
+cli studio monitor unmute
+```
+
+Monitors cap at unity — boosting the speakers above the mix is never what
+anyone means. New sessions start **muted at −20 dB**, because setup attaches
+speakers of unknown volume to routing that did not exist a moment earlier.
+A single relative change over ±12 dB is refused as a typo.
+
+## Sessions and drift
+
+The session file is the desired state; REAPER is the actual state. They are
+compared rather than assumed equal.
+
+```sh
+cli studio status               # connection, and any drift from the session
+cli studio sync                 # make REAPER match the session
+cli studio sync --dry-run
+cli studio session list|new|save|show
+```
+
+Edits are recorded even when REAPER is unreachable, and reported rather than
+hidden, so nothing is lost because the DAW happened to be closed.
+
+## Configuration
+
+```yaml
+# ~/.config/cli/config.yaml
+studio:
+  reaper_host: 127.0.0.1
+  reaper_port: 8765
+  session_dir: ~/.local/share/cli/studio/sessions
+  session: default
+```
+
+```sh
+CLI_STUDIO_REAPER_PORT=9080 cli studio status
+```
+
+The port is deliberately not REAPER's own default of 8080, which is the most
+contested port on a development machine. REAPER's web interface has no
+authentication by default, so it is worth setting a password in that same
+preferences pane if your network is shared.
+
 ## Development
 
 ```sh
@@ -251,6 +416,9 @@ Demucs required to run the suite.
 ```
 internal/
 ├── cli/        cobra command tree: the toolbox root and each tool
+├── studio/     the studio domain: topology, levels, chains, sessions
+├── daw/        what the app needs from a workstation, in studio terms
+├── reaper/     REAPER adapter: web interface client and ReaScript bridge
 ├── dtxspec/    the module's requirements: format, limits, naming rules
 ├── runner/     external process execution, streaming output, cancellation
 ├── youtube/    yt-dlp
