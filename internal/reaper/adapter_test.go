@@ -3,6 +3,8 @@ package reaper
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -352,8 +354,7 @@ func TestDisplayEffectsCarryTheShowFlag(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("got %d calls, want 1", len(calls))
 	}
-	// setfx(role, plugin, enabled, showsUI)
-	if !strings.HasSuffix(calls[0], ",1,1)") {
+	if got := setfxArg(t, calls[0], showUIArg); got != "1" {
 		t.Errorf("call = %q, want it to request the window be shown", calls[0])
 	}
 
@@ -363,7 +364,53 @@ func TestDisplayEffectsCarryTheShowFlag(t *testing.T) {
 	if err := a2.SetEffect(context.Background(), "guitar", "overdrive", true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := f2.called(); !strings.HasSuffix(got[0], ",1,0)") {
-		t.Errorf("call = %q, want no window for an audible effect", got[0])
+	if got := setfxArg(t, f2.called()[0], showUIArg); got != "0" {
+		t.Errorf("call = %q, want no window for an audible effect", f2.called()[0])
+	}
+}
+
+// Argument positions within a recorded setfx call.
+const (
+	showUIArg  = 3
+	initialArg = 4
+)
+
+// setfxArg pulls one argument out of a recorded "setfx(a,b,c,d,e)" call.
+// Reading by position rather than by matching the end of the string means
+// adding another argument does not silently invalidate the assertion.
+func setfxArg(t *testing.T, call string, index int) string {
+	t.Helper()
+	open := strings.IndexByte(call, '(')
+	if open < 0 || !strings.HasSuffix(call, ")") {
+		t.Fatalf("unrecognised call %q", call)
+	}
+	args := strings.Split(call[open+1:len(call)-1], ",")
+	if index >= len(args) {
+		t.Fatalf("call %q has no argument %d", call, index)
+	}
+	return args[index]
+}
+
+// A compressor that loads with its threshold at 0 dBFS never engages, so
+// switching it on does nothing a player can hear. Starting values must reach
+// the plugin.
+func TestCompressorCarriesAWorkingThreshold(t *testing.T) {
+	f := newFakeREAPER()
+	a := f.server(t)
+
+	if err := a.SetEffect(context.Background(), "bass", "compressor", true); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := setfxArg(t, f.called()[0], initialArg)
+	if !strings.HasPrefix(got, "Threshold=") {
+		t.Fatalf("initial params = %q, want a Threshold", got)
+	}
+	// -18 dB as the linear scalar the plugin expects.
+	var v float64
+	if _, err := fmt.Sscanf(strings.TrimPrefix(got, "Threshold="), "%g", &v); err != nil {
+		t.Fatalf("unparsable threshold %q", got)
+	}
+	if db := 20 * math.Log10(v); math.Abs(db-(-18)) > 0.01 {
+		t.Errorf("threshold is %.2f dB, want -18", db)
 	}
 }

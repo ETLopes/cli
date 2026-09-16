@@ -1,6 +1,9 @@
 package studio
 
-import "strings"
+import (
+	"math"
+	"strings"
+)
 
 // Effect is one processor in an instrument's chain.
 //
@@ -19,12 +22,33 @@ type Effect struct {
 	Plugin string
 	// DefaultOn is whether the effect starts enabled on a fresh session.
 	DefaultOn bool
+	// Initial holds parameter values written when the plugin is first added,
+	// keyed by the name the plugin reports for them. Several stock plugins
+	// load in a state that is deliberately transparent -- a compressor whose
+	// threshold sits at 0 dBFS never engages -- so switching one on appears
+	// to do nothing at all. These give each effect a starting point that is
+	// audibly doing its job, and are applied only on creation so later
+	// adjustments are never overwritten.
+	Initial []ParamDefault
 	// ShowsUI marks an effect whose whole purpose is its display. A tuner
 	// processes nothing audible; enabling it without opening its window
 	// accomplishes nothing a player can use, so the window is opened with it
 	// and closed again when it is switched off.
 	ShowsUI bool
 }
+
+// ParamDefault is one plugin parameter value.
+type ParamDefault struct {
+	// Name is the parameter name the plugin reports.
+	Name string
+	// Value is the raw parameter value, in whatever scale the plugin uses.
+	Value float64
+}
+
+// DBScalar converts decibels to the linear scalar several Cockos plugins use
+// for level parameters, where 1.0 is 0 dBFS. Verified against ReaComp, which
+// reports exactly the decibel value asked for.
+func DBScalar(db float64) float64 { return math.Pow(10, db/20) }
 
 // chains maps an instrument ID to its processing chain, in signal order.
 //
@@ -35,14 +59,18 @@ var chains = map[string][]Effect{
 	"guitar": {
 		{ID: "tuner", Name: "Tuner", Label: "TUN", Plugin: "ReaTune", ShowsUI: true},
 		{ID: "overdrive", Name: "Overdrive", Label: "OD", Plugin: "JS: Distortion"},
-		{ID: "amp", Name: "Amp Simulator", Label: "AMP", Plugin: "JS: Amp Model"},
+		{ID: "amp", Name: "Amp Simulator", Label: "AMP", Plugin: "JS: Convolution Amp/Cab Modeler"},
 		{ID: "eq", Name: "EQ", Label: "EQ", Plugin: "ReaEQ"},
-		{ID: "compressor", Name: "Compressor", Label: "COMP", Plugin: "ReaComp"},
+		{ID: "compressor", Name: "Compressor", Label: "COMP", Plugin: "ReaComp",
+			Initial: []ParamDefault{{Name: "Threshold", Value: DBScalar(-18)}}},
 	},
 	"bass": {
 		{ID: "tuner", Name: "Tuner", Label: "TUN", Plugin: "ReaTune", ShowsUI: true},
-		{ID: "compressor", Name: "Compressor", Label: "COMP", Plugin: "ReaComp"},
-		{ID: "amp", Name: "Bass Amp", Label: "AMP", Plugin: "JS: Amp Model"},
+		{ID: "compressor", Name: "Compressor", Label: "COMP", Plugin: "ReaComp",
+			// Bass sits under a hand rather than a pick most of the time, so
+			// a gentle, fairly low threshold evens it out without pumping.
+			Initial: []ParamDefault{{Name: "Threshold", Value: DBScalar(-18)}}},
+		{ID: "amp", Name: "Bass Amp", Label: "AMP", Plugin: "JS: Convolution Amp/Cab Modeler"},
 		{ID: "eq", Name: "EQ", Label: "EQ", Plugin: "ReaEQ"},
 	},
 	// Microphones, keyboard and drums carry no mandatory processing. They

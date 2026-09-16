@@ -236,8 +236,12 @@ func (a *Adapter) SetEffect(ctx context.Context, instrumentID, effectID string, 
 	if !ok {
 		return fmt.Errorf("%s has no effect %q", in.ID, effectID)
 	}
+	var initial []string
+	for _, p := range eff.Initial {
+		initial = append(initial, fmt.Sprintf("%s=%g", p.Name, p.Value))
+	}
 	_, err := a.call(ctx, "setfx", roleOf(in.ID), eff.Plugin,
-		boolArg(enabled), boolArg(eff.ShowsUI))
+		boolArg(enabled), boolArg(eff.ShowsUI), strings.Join(initial, ","))
 	return err
 }
 

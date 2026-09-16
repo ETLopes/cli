@@ -278,14 +278,34 @@ function ops.setfx(args)
   if not tr then error("no managed track for " .. inst_role) end
 
   local idx = fx_index(tr, plugin)
+  local created = false
   if idx < 0 then
     if not enabled then return "absent" end
     idx = reaper.TrackFX_AddByName(tr, plugin, false, 1)
     if idx < 0 then
       error("plugin not found: " .. plugin)
     end
+    created = true
   end
   reaper.TrackFX_SetEnabled(tr, idx, enabled)
+
+  -- Starting values are written only on creation. Several stock plugins load
+  -- in a state that does nothing audible, but re-applying defaults on every
+  -- toggle would discard whatever the player had dialled in since.
+  if created and args[5] and args[5] ~= "" then
+    for _, pair in ipairs(split(args[5], ",")) do
+      local name, value = pair:match("^(.-)=(.*)$")
+      if name and value then
+        for i = 0, reaper.TrackFX_GetNumParams(tr, idx) - 1 do
+          local _, pname = reaper.TrackFX_GetParamName(tr, idx, i, "")
+          if pname == name then
+            reaper.TrackFX_SetParam(tr, idx, i, tonumber(value) or 0)
+            break
+          end
+        end
+      end
+    end
+  end
 
   -- A tuner that is loaded but not on screen reads to the player as nothing
   -- having happened, so its window follows the switch.
@@ -425,6 +445,43 @@ function ops.delfx(args)
   if idx < 0 then return "absent" end
   reaper.TrackFX_Delete(tr, idx)
   return "deleted"
+end
+
+-- enumfx lists the plugins REAPER actually has installed, optionally filtered
+-- by a substring. Plugin names cannot be guessed: they vary by platform and
+-- install, and a wrong one fails only at the moment a player reaches for it.
+function ops.enumfx(args)
+  local needle = (args[1] or ""):lower()
+  local out, i = {}, 0
+  while true do
+    local ok, name, ident = reaper.EnumInstalledFX(i)
+    if not ok then break end
+    if needle == "" or name:lower():find(needle, 1, true) then
+      out[#out + 1] = name
+    end
+    i = i + 1
+    if i > 5000 then break end
+  end
+  return table.concat(out, SEP)
+end
+
+-- setfxparam sets a plugin parameter by its reported name, so callers need
+-- not know indexes that differ between plugins and versions.
+function ops.setfxparam(args)
+  local tr = find_managed(args[1])
+  if not tr then error("no managed track for " .. tostring(args[1])) end
+  local idx = fx_index(tr, args[2])
+  if idx < 0 then error("plugin not on track: " .. tostring(args[2])) end
+
+  for i = 0, reaper.TrackFX_GetNumParams(tr, idx) - 1 do
+    local _, pname = reaper.TrackFX_GetParamName(tr, idx, i, "")
+    if pname == args[3] then
+      reaper.TrackFX_SetParam(tr, idx, i, tonumber(args[4]))
+      local _, fmt = reaper.TrackFX_GetFormattedParamValue(tr, idx, i, "")
+      return pname .. "=" .. tostring(fmt)
+    end
+  end
+  error("no parameter named " .. tostring(args[3]))
 end
 
 function ops.save()
