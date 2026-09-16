@@ -19,6 +19,11 @@ type Effect struct {
 	Plugin string
 	// DefaultOn is whether the effect starts enabled on a fresh session.
 	DefaultOn bool
+	// ShowsUI marks an effect whose whole purpose is its display. A tuner
+	// processes nothing audible; enabling it without opening its window
+	// accomplishes nothing a player can use, so the window is opened with it
+	// and closed again when it is switched off.
+	ShowsUI bool
 }
 
 // chains maps an instrument ID to its processing chain, in signal order.
@@ -28,14 +33,14 @@ type Effect struct {
 // leaves the tone free to change afterwards.
 var chains = map[string][]Effect{
 	"guitar": {
-		{ID: "tuner", Name: "Tuner", Label: "TUN", Plugin: "ReaTune"},
+		{ID: "tuner", Name: "Tuner", Label: "TUN", Plugin: "ReaTune", ShowsUI: true},
 		{ID: "overdrive", Name: "Overdrive", Label: "OD", Plugin: "JS: Distortion"},
 		{ID: "amp", Name: "Amp Simulator", Label: "AMP", Plugin: "JS: Amp Model"},
 		{ID: "eq", Name: "EQ", Label: "EQ", Plugin: "ReaEQ"},
 		{ID: "compressor", Name: "Compressor", Label: "COMP", Plugin: "ReaComp"},
 	},
 	"bass": {
-		{ID: "tuner", Name: "Tuner", Label: "TUN", Plugin: "ReaTune"},
+		{ID: "tuner", Name: "Tuner", Label: "TUN", Plugin: "ReaTune", ShowsUI: true},
 		{ID: "compressor", Name: "Compressor", Label: "COMP", Plugin: "ReaComp"},
 		{ID: "amp", Name: "Bass Amp", Label: "AMP", Plugin: "JS: Amp Model"},
 		{ID: "eq", Name: "EQ", Label: "EQ", Plugin: "ReaEQ"},

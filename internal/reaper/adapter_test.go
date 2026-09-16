@@ -337,3 +337,33 @@ func TestConcurrentCallsDoNotInterfere(t *testing.T) {
 		}
 	}
 }
+
+// A tuner processes nothing audible: its whole value is the readout. Loading
+// it without opening its window looks to the player exactly like nothing
+// happened, which is what made this worth fixing.
+func TestDisplayEffectsCarryTheShowFlag(t *testing.T) {
+	f := newFakeREAPER()
+	a := f.server(t)
+
+	if err := a.SetEffect(context.Background(), "guitar", "tuner", true); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	calls := f.called()
+	if len(calls) != 1 {
+		t.Fatalf("got %d calls, want 1", len(calls))
+	}
+	// setfx(role, plugin, enabled, showsUI)
+	if !strings.HasSuffix(calls[0], ",1,1)") {
+		t.Errorf("call = %q, want it to request the window be shown", calls[0])
+	}
+
+	// An audible effect must not steal focus by opening a window.
+	f2 := newFakeREAPER()
+	a2 := f2.server(t)
+	if err := a2.SetEffect(context.Background(), "guitar", "overdrive", true); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := f2.called(); !strings.HasSuffix(got[0], ",1,0)") {
+		t.Errorf("call = %q, want no window for an audible effect", got[0])
+	}
+}

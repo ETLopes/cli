@@ -136,7 +136,12 @@ local function ensure_hw_out(tr, chan)
   return created, repaired
 end
 
--- ensure_input assigns a mono hardware input to a track and arms it.
+-- ensure_input assigns a mono hardware input to a track, enables input
+-- monitoring, and arms it for record.
+--
+-- Arming is not optional here. REAPER only passes input through a track that
+-- is armed, so without it nothing reaches the cue mixes, the monitors, or a
+-- tuner: the whole studio is silent while appearing correctly wired.
 local function ensure_input(tr, channel)
   -- I_RECINPUT: a mono hardware input is simply its zero-based channel.
   local want = channel - 1
@@ -147,6 +152,10 @@ local function ensure_input(tr, channel)
   end
   if reaper.GetMediaTrackInfo_Value(tr, "I_RECMON") ~= 1 then
     reaper.SetMediaTrackInfo_Value(tr, "I_RECMON", 1)
+    changed = true
+  end
+  if reaper.GetMediaTrackInfo_Value(tr, "I_RECARM") ~= 1 then
+    reaper.SetMediaTrackInfo_Value(tr, "I_RECARM", 1)
     changed = true
   end
   return changed
@@ -257,8 +266,14 @@ function ops.setsend(args)
   return "ok"
 end
 
+-- TrackFX_Show modes.
+local FX_HIDE_FLOATING = 2
+local FX_SHOW_FLOATING = 3
+
 function ops.setfx(args)
   local inst_role, plugin, enabled = args[1], args[2], args[3] == "1"
+  -- shows_ui marks an effect that exists to be looked at, such as a tuner.
+  local shows_ui = args[4] == "1"
   local tr = find_managed(inst_role)
   if not tr then error("no managed track for " .. inst_role) end
 
@@ -271,6 +286,12 @@ function ops.setfx(args)
     end
   end
   reaper.TrackFX_SetEnabled(tr, idx, enabled)
+
+  -- A tuner that is loaded but not on screen reads to the player as nothing
+  -- having happened, so its window follows the switch.
+  if shows_ui then
+    reaper.TrackFX_Show(tr, idx, enabled and FX_SHOW_FLOATING or FX_HIDE_FLOATING)
+  end
   return "ok"
 end
 

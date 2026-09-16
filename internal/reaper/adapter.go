@@ -236,7 +236,8 @@ func (a *Adapter) SetEffect(ctx context.Context, instrumentID, effectID string, 
 	if !ok {
 		return fmt.Errorf("%s has no effect %q", in.ID, effectID)
 	}
-	_, err := a.call(ctx, "setfx", roleOf(in.ID), eff.Plugin, boolArg(enabled))
+	_, err := a.call(ctx, "setfx", roleOf(in.ID), eff.Plugin,
+		boolArg(enabled), boolArg(eff.ShowsUI))
 	return err
 }
 
