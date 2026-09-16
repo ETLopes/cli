@@ -24,8 +24,11 @@ type tool struct {
 	Run func(ctx context.Context) error
 }
 
-// tools lists everything the launcher offers, in display order. Adding a tool
-// here is all that is needed for it to appear.
+// tools lists everything the launcher offers, in display order.
+//
+// This has to stay in step with the subcommands the root registers; a tool
+// missing here is invisible to anyone who runs the toolbox with no arguments,
+// which is the only discovery route there is. A test cross-checks the two.
 func tools(e *env) []tool {
 	return []tool{
 		{
@@ -33,6 +36,12 @@ func tools(e *env) []tool {
 			Short: "Turn a video into DTX-PRO drum practice tracks",
 			Glyph: "♪",
 			Run:   func(ctx context.Context) error { return runPrep(ctx, e, nil) },
+		},
+		{
+			Name:  "studio",
+			Short: "Drive a REAPER home studio: cue mixes, effects, monitoring",
+			Glyph: "♫",
+			Run:   func(ctx context.Context) error { return runStudioTUI(ctx, e) },
 		},
 	}
 }

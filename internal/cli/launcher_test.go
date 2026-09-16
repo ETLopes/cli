@@ -108,3 +108,42 @@ func TestLauncherViewListsTools(t *testing.T) {
 		t.Errorf("view after selection = %q, want empty", got)
 	}
 }
+
+// The launcher is the only way a tool is discovered by someone who runs the
+// toolbox with no arguments, so one missing from it is effectively invisible.
+// This caught `studio` being absent after it was built and shipped.
+func TestLauncherListsEveryTool(t *testing.T) {
+	e := &env{}
+	root := newRootCmd(e)
+
+	// Subcommands that are tools rather than toolbox plumbing.
+	plumbing := map[string]bool{
+		"config": true, "version": true, "help": true, "completion": true,
+	}
+	var expected []string
+	for _, c := range root.Commands() {
+		name := c.Name()
+		if plumbing[name] || c.Hidden {
+			continue
+		}
+		expected = append(expected, name)
+	}
+
+	listed := map[string]bool{}
+	for _, tl := range tools(e) {
+		listed[tl.Name] = true
+		if tl.Run == nil {
+			t.Errorf("tool %q has no interactive entry point", tl.Name)
+		}
+		if tl.Short == "" {
+			t.Errorf("tool %q has no description", tl.Name)
+		}
+	}
+
+	for _, name := range expected {
+		if !listed[name] {
+			t.Errorf("subcommand %q is not offered by the launcher, so it is "+
+				"invisible to anyone running the toolbox bare", name)
+		}
+	}
+}
