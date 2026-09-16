@@ -201,6 +201,32 @@ func (a *Adapter) Setup(ctx context.Context) (daw.SetupReport, error) {
 	}
 
 	var report daw.SetupReport
+
+	// Plugins added before tagging existed carry only their plugin name, so
+	// they would be missed and duplicated. Repairing them is part of what
+	// setup means: bring what is there into line rather than add beside it.
+	for _, in := range studio.Instruments() {
+		var pairs []string
+		for _, eff := range studio.Chain(in.ID) {
+			pairs = append(pairs, eff.ID+":"+eff.Plugin)
+		}
+		if len(pairs) == 0 {
+			continue
+		}
+		adopted, adoptErr := a.call(ctx, "adopt", roleOf(in.ID), strings.Join(pairs, ","))
+		if adoptErr != nil {
+			// A track that cannot be repaired should not fail the whole setup.
+			continue
+		}
+		if adopted != "" {
+			for _, id := range strings.Split(adopted, ",") {
+				report.Actions = append(report.Actions, daw.Action{
+					Kind: "repaired", Object: in.Name + " " + id, Detail: "adopted an untagged plugin",
+				})
+			}
+		}
+	}
+
 	for _, entry := range strings.Split(raw, fieldSep) {
 		if entry == "" {
 			continue

@@ -283,6 +283,51 @@ end
 local FX_HIDE_FLOATING = 2
 local FX_SHOW_FLOATING = 3
 
+-- adopt tags plugins that were added before tagging existed.
+--
+-- Instances created earlier carry only their plugin name, so a lookup by tag
+-- misses them and a second copy gets added alongside. Matching each untagged
+-- instance to the first chain entry that wants that plugin repairs them in
+-- place, and each entry claims at most one so three ReaTune instances cannot
+-- all become the tuner.
+function ops.adopt(args)
+  local role = args[1]
+  local tr = find_managed(role)
+  if not tr then error("no managed track for " .. tostring(role)) end
+
+  local claimed = {}
+  local adopted = {}
+
+  -- Anything already tagged keeps its identity.
+  for i = 0, reaper.TrackFX_GetCount(tr) - 1 do
+    local _, name = reaper.TrackFX_GetFXName(tr, i, "")
+    if name:find("cs:", 1, true) then
+      claimed[name] = true
+    end
+  end
+
+  for _, spec in ipairs(split(args[2] or "", ",")) do
+    local sep = spec:find(":")
+    if sep then
+      local effect_id = spec:sub(1, sep - 1)
+      local plugin = spec:sub(sep + 1)
+      local tag = fx_tag(effect_id)
+      if not claimed[tag] then
+        for i = 0, reaper.TrackFX_GetCount(tr) - 1 do
+          local _, name = reaper.TrackFX_GetFXName(tr, i, "")
+          if not name:find("cs:", 1, true) and name:find(plugin, 1, true) then
+            reaper.TrackFX_SetNamedConfigParm(tr, i, "renamed_name", tag)
+            claimed[tag] = true
+            adopted[#adopted + 1] = effect_id
+            break
+          end
+        end
+      end
+    end
+  end
+  return table.concat(adopted, ",")
+end
+
 function ops.setfx(args)
   local inst_role, plugin, enabled = args[1], args[2], args[3] == "1"
   -- shows_ui marks an effect that exists to be looked at, such as a tuner.
@@ -582,7 +627,10 @@ function ops.setchannel(args)
     set_param(tr, "cs:eq", "ReaEQ", "Gain-High Shelf 4", eq_gain(high), true)
     set_param(tr, "cs:eq", "ReaEQ", "Gain-Band 3", eq_gain(mid), true)
     set_param(tr, "cs:eq", "ReaEQ", "Gain-Low Shelf", eq_gain(low), true)
-    set_param(tr, "cs:eq", "ReaEQ", "Global Gain", eq_gain(trim), true)
+    -- Global Gain is unity at 1.0, unlike the band gains which are unity at
+    -- 0.25. Using the band scaling here inverted the sign: asking for +6 dB
+    -- produced -6. Two scales in one plugin, so each needs its own.
+    set_param(tr, "cs:eq", "ReaEQ", "Global Gain", db_to_scalar(trim), true)
   end
   -- The frequency sweep is logarithmic about a 40 Hz offset, not a plain log
   -- between its endpoints. Measured by sweeping the parameter and reading the

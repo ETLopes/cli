@@ -87,6 +87,9 @@ type studioModel struct {
 	conRows []consoleRow
 	conChan int
 	conRow  int
+	// showHelp keeps the explanation of the selected control on screen. On by
+	// default, since not knowing what a control does is the common case.
+	showHelp bool
 
 	// fxInstrument is which instrument the FX page is showing. The chains run
 	// to dozens of pedals, so they are paged per instrument rather than
@@ -122,6 +125,7 @@ func newStudioModel(ctx context.Context, s *studioEnv) studioModel {
 		rows:    map[string]row{},
 	}
 	m.conRows = consoleRows()
+	m.showHelp = true
 	m.rebuild()
 	return m
 }
@@ -559,6 +563,9 @@ func (m studioModel) handleConsoleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	case "r":
 		m.status, m.statusErr = "reconnecting...", false
 		return m, m.connect()
+	case "?":
+		m.showHelp = !m.showHelp
+		return m, nil
 	case "+", "=":
 		notches = 1
 	case "-", "_":
@@ -667,6 +674,20 @@ func (m studioModel) View() tea.View {
 
 	if m.onConsole() {
 		b.WriteString(renderConsole(m.studio.session, m.conRows, m.conChan, m.conRow, m.width))
+
+		// What the selected control does, always in view. A desk assumes you
+		// already know; there is no reason this should.
+		if m.conRow < len(m.conRows) && m.showHelp {
+			row := m.conRows[m.conRow]
+			b.WriteString("\n  " + ui.Accent.Render(row.label()) + "  ")
+			for i, line := range wrap(row.explain(), max(40, m.width-12)) {
+				if i > 0 {
+					b.WriteString("\n        ")
+				}
+				b.WriteString(ui.Muted.Render(line))
+			}
+			b.WriteString("\n")
+		}
 		b.WriteString("\n")
 		if m.status != "" {
 			if m.statusErr {
@@ -676,7 +697,7 @@ func (m studioModel) View() tea.View {
 			}
 		}
 		b.WriteString("\n  " + ui.Muted.Render(
-			"←/→ channel · ↑/↓ control · +/- adjust (shift ×4) · space toggle · tab page · s save · q quit") + "\n")
+			"←/→ channel · ↑/↓ control · +/- adjust (shift ×4) · space toggle · ? help · tab page · s save · q quit") + "\n")
 		v := tea.NewView(b.String())
 		v.AltScreen = true
 		return v

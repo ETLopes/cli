@@ -197,3 +197,57 @@ func (c StripControl) Label() string {
 // IsSwitch reports whether the control is a switch rather than a continuous
 // one, which decides whether it responds to left and right or to space.
 func (c StripControl) IsSwitch() bool { return c == ControlMute || c == ControlSolo }
+
+// Explain says what a control does and what moving it changes.
+//
+// A mixing desk assumes you already know; this does not. The wording is about
+// what you will hear, not what the parameter is called, because "threshold" is
+// only useful to someone who already understands compression.
+func (c StripControl) Explain() string {
+	switch c {
+	case ControlTrim:
+		return "Input level before anything else. Raise it if a quiet source is " +
+			"barely registering, lower it if the signal is distorting. Set this " +
+			"first: everything below reacts to what it is fed."
+	case ControlHigh:
+		return "Treble. Boost for air, breath and string detail; cut to tame " +
+			"harshness, cymbal splash or sibilance."
+	case ControlMid:
+		return "The band where most instruments live, so it decides what sounds " +
+			"present and what sounds buried. Cutting here usually clears space; " +
+			"boosting brings a source forward and can sound boxy or nasal."
+	case ControlMidFreq:
+		return "Which frequency the MID control acts on. Sweep it while boosting " +
+			"to find the offending note, then cut there. Low hundreds is boxiness, " +
+			"around 1k is honk, 3-4k is bite and harshness."
+	case ControlLow:
+		return "Bass. Boost for weight and body; cut to remove rumble, mic thump, " +
+			"or mud where several instruments are fighting for the same low end."
+	case ControlComp:
+		return "How hard the compressor works. It makes loud parts quieter, which " +
+			"evens out a performance and lets you raise the overall level. A little " +
+			"steadies a vocal or bass; a lot flattens dynamics and starts to pump."
+	case ControlPan:
+		return "Where the channel sits between the left and right speakers. " +
+			"Spreading sources apart stops them masking each other; keep bass, " +
+			"kick and lead vocal near the centre."
+	case ControlMute:
+		return "Silences this channel everywhere, including the headphone mixes."
+	case ControlSolo:
+		return "Hears this channel alone. While anything is soloed, everything " +
+			"not soloed goes quiet. Useful for finding a problem; easy to leave " +
+			"on by mistake."
+	case ControlFader:
+		return "The channel's level in the main mix. It does not affect the " +
+			"headphone mixes: those are taken before the fader, so you can change " +
+			"the room mix without touching what anyone is hearing."
+	}
+	return ""
+}
+
+// ExplainAux says what a cue send does.
+func ExplainAux(cue int) string {
+	return fmt.Sprintf("How much of this channel goes to headphone mix %d. "+
+		"Each mix is what one musician hears, independent of the others and of "+
+		"the main fader.", cue)
+}

@@ -33,6 +33,38 @@ func (r consoleRow) label() string {
 // isSwitch reports whether the row holds switches rather than values.
 func (r consoleRow) isSwitch() bool { return r.cue == 0 && r.control.IsSwitch() }
 
+// explain says what this control does, for the line under the desk.
+func (r consoleRow) explain() string {
+	if r.cue > 0 {
+		return studio.ExplainAux(r.cue)
+	}
+	return r.control.Explain()
+}
+
+// wrap breaks text to a width, so an explanation reads as a paragraph rather
+// than running off the side of the terminal.
+func wrap(text string, width int) []string {
+	if width < 20 {
+		width = 20
+	}
+	var lines []string
+	var line strings.Builder
+	for _, word := range strings.Fields(text) {
+		if line.Len() > 0 && line.Len()+1+len(word) > width {
+			lines = append(lines, line.String())
+			line.Reset()
+		}
+		if line.Len() > 0 {
+			line.WriteByte(' ')
+		}
+		line.WriteString(word)
+	}
+	if line.Len() > 0 {
+		lines = append(lines, line.String())
+	}
+	return lines
+}
+
 // consoleRows builds the desk's rows, with the aux sends sitting after the
 // dynamics as they do on a real strip. How many there are follows the rig.
 func consoleRows() []consoleRow {
