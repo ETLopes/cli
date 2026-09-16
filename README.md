@@ -318,6 +318,47 @@ A rig is checked before it is used: two inputs on one channel, or two buses on
 one output, is refused rather than discovered through the speakers. A session
 written against a different rig still opens, reporting what it had to drop.
 
+## The console
+
+`cli studio` opens on a console view: one strip per input, side by side, every
+control in the same place on every strip. It is read by position rather than by
+label, which is what makes a desk fast once your hands know it.
+
+```
+        MIC 1    MIC 2    GUITAR   BASS     KEYBOARD DTX
+ TRIM   0        0        0        0        0        0
+ HIGH   0        0        +3       0        0        0
+ MID    0        0        -2       0        0        0
+ FREQ   1.0k     1.0k     1.0k     1.0k     1.0k     1.0k
+ LOW    0        0        +1       0        0        0
+ COMP   0%       0%       35%      55%      0%       0%
+ AUX1   0        0        +3       0        0        0
+ AUX2   0        0        0        0        0        0
+ PAN    C        C        L20      C        C        C
+ MUTE   ·        ·        ·        ON       ·        ·
+ SOLO   ·        ·        ·        ·        ·        ·
+ ─────────────────────────────────────────────────────
+ FADER  0        0        -3       -1       0        0
+```
+
+| Key | |
+|---|---|
+| `←` `→` | move between channels |
+| `↑` `↓` | move between controls |
+| `+` `-` | adjust (shift for four notches at once) |
+| `space` | toggle mute and solo |
+| `tab` | other pages: cue mixes, the pedalboards, monitoring |
+| `s` | save |
+
+The aux rows *are* the cue sends, so `AUX1` on the console and
+`cli studio cue 1 guitar +3` move the same thing. How many aux rows appear
+follows the rig: a desk has a fixed number of sends, and this does not.
+
+Tone and dynamics drive the channel's own EQ and compressor rather than adding
+a second set, so the console and the pedalboard cannot fight over the same
+signal. `TRIM` is digital input gain — the preamp knobs on the interface are
+analogue and out of reach from here.
+
 ## Cue mixes
 
 A cue mix is what one musician hears. Sends are **pre-fader post-FX**, so they

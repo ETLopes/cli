@@ -51,6 +51,10 @@ type Session struct {
 	// against a different rig can still be opened and the loss reported
 	// rather than hidden.
 	Warnings []string
+	// channels holds each input's strip: gain, tone, dynamics, placement and
+	// level. Kept apart from fx because a strip is always present and always
+	// in the same order, while the pedalboard is a chain of optional things.
+	channels map[string]Channel
 	// tunings holds pitch-correction settings per instrument and effect.
 	// These are not a plugin's incidental state: which notes are legal and
 	// how fast the voice is dragged onto them is the whole sound.
@@ -65,11 +69,12 @@ type Session struct {
 // Unmuting is one command; hearing damage is not undoable.
 func NewSession(name string) *Session {
 	s := &Session{
-		Name:    name,
-		monitor: Monitor{Volume: SafeStartupLevel, Muted: true},
-		cues:    make(map[int]*CueMix, CueCount()),
-		fx:      make(map[string]map[string]bool),
-		tunings: make(map[string]map[string]Tuning),
+		Name:     name,
+		monitor:  Monitor{Volume: SafeStartupLevel, Muted: true},
+		cues:     make(map[int]*CueMix, CueCount()),
+		fx:       make(map[string]map[string]bool),
+		tunings:  make(map[string]map[string]Tuning),
+		channels: make(map[string]Channel),
 	}
 
 	for _, bus := range CueBuses() {
@@ -100,8 +105,61 @@ func NewSession(name string) *Session {
 		}
 		s.fx[in.ID] = enabled
 		s.tunings[in.ID] = tuned
+		s.channels[in.ID] = NewChannel()
 	}
 	return s
+}
+
+// Channel returns an input's strip.
+func (s *Session) Channel(instrumentID string) (Channel, bool) {
+	in, ok := LookupInstrument(instrumentID)
+	if !ok {
+		return Channel{}, false
+	}
+	c, ok := s.channels[in.ID]
+	if !ok {
+		// An input added to the rig after the session was written still gets
+		// a strip, rather than a zero value with the fader at silence.
+		return NewChannel(), true
+	}
+	return c, true
+}
+
+// SetChannel records an input's strip.
+func (s *Session) SetChannel(instrumentID string, c Channel) error {
+	in, ok := LookupInstrument(instrumentID)
+	if !ok {
+		return unknownInstrument(instrumentID)
+	}
+	if err := c.Validate(); err != nil {
+		return fmt.Errorf("%s: %w", in.ID, err)
+	}
+	s.channels[in.ID] = c
+	return nil
+}
+
+// AnySoloed reports whether any channel is soloed, which is what decides
+// whether the others should be heard at all.
+func (s *Session) AnySoloed() bool {
+	for _, in := range current.Instruments {
+		if c, ok := s.channels[in.ID]; ok && c.Soloed {
+			return true
+		}
+	}
+	return false
+}
+
+// Audible reports whether a channel is heard, accounting for its own mute and
+// for anything else being soloed.
+func (s *Session) Audible(instrumentID string) bool {
+	c, ok := s.Channel(instrumentID)
+	if !ok || c.Muted {
+		return false
+	}
+	if s.AnySoloed() {
+		return c.Soloed
+	}
+	return true
 }
 
 // Tuning returns the pitch-correction setting for one effect.
@@ -319,8 +377,23 @@ type file struct {
 		Volume float64 `yaml:"volume"`
 		Muted  bool    `yaml:"muted"`
 	} `yaml:"monitor"`
-	Cues map[int]map[string]float64 `yaml:"cues"`
-	FX   map[string]map[string]bool `yaml:"fx,omitempty"`
+	Channels map[string]channelFile     `yaml:"channels,omitempty"`
+	Cues     map[int]map[string]float64 `yaml:"cues"`
+	FX       map[string]map[string]bool `yaml:"fx,omitempty"`
+}
+
+// channelFile is a strip's on-disk shape.
+type channelFile struct {
+	Trim    float64 `yaml:"trim"`
+	High    float64 `yaml:"high"`
+	Mid     float64 `yaml:"mid"`
+	MidFreq float64 `yaml:"mid_freq"`
+	Low     float64 `yaml:"low"`
+	Comp    float64 `yaml:"comp"`
+	Pan     float64 `yaml:"pan"`
+	Fader   float64 `yaml:"fader"`
+	Muted   bool    `yaml:"muted"`
+	Soloed  bool    `yaml:"soloed"`
 }
 
 // Marshal renders the session as YAML.
@@ -337,6 +410,15 @@ func (s *Session) Marshal() ([]byte, error) {
 			levels[inst] = float64(lvl)
 		}
 		f.Cues[id] = levels
+	}
+
+	f.Channels = make(map[string]channelFile, len(s.channels))
+	for id, c := range s.channels {
+		f.Channels[id] = channelFile{
+			Trim: float64(c.Trim), High: float64(c.EQ.High), Mid: float64(c.EQ.Mid),
+			MidFreq: c.EQ.MidFreq, Low: float64(c.EQ.Low), Comp: c.Comp,
+			Pan: c.Pan, Fader: float64(c.Fader), Muted: c.Muted, Soloed: c.Soloed,
+		}
 	}
 
 	f.FX = make(map[string]map[string]bool, len(s.fx))
@@ -421,6 +503,27 @@ func Unmarshal(data []byte) (*Session, error) {
 		s.Warnings = append(s.Warnings, fmt.Sprintf(
 			"session has %d input(s) this studio does not: %s",
 			len(droppedInputs), strings.Join(sortedKeys(droppedInputs), ", ")))
+	}
+
+	for _, instID := range sortedKeys(f.Channels) {
+		cf := f.Channels[instID]
+		if _, ok := LookupInstrument(instID); !ok {
+			droppedInputs[instID] = true
+			continue
+		}
+		ch := Channel{
+			Trim: Level(cf.Trim), Comp: cf.Comp, Pan: cf.Pan,
+			Fader: Level(cf.Fader), Muted: cf.Muted, Soloed: cf.Soloed,
+			EQ: EQ{Low: Level(cf.Low), Mid: Level(cf.Mid), High: Level(cf.High), MidFreq: cf.MidFreq},
+		}
+		if ch.EQ.MidFreq == 0 {
+			ch.EQ.MidFreq = DefaultMidFreq
+		}
+		// A strip outside the desk's range is unsafe rather than stale, so it
+		// is refused the same way an impossible level is.
+		if err := s.SetChannel(instID, ch); err != nil {
+			return nil, fmt.Errorf("reading session: %w", err)
+		}
 	}
 
 	droppedFX := 0

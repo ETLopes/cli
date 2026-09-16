@@ -89,6 +89,10 @@ type DAW interface {
 	// SetEffect enables or disables one effect in an instrument's chain.
 	SetEffect(ctx context.Context, instrumentID, effectID string, enabled bool) error
 
+	// SetChannel applies an input's whole strip: gain, tone, dynamics,
+	// placement and level.
+	SetChannel(ctx context.Context, instrumentID string, c studio.Channel) error
+
 	// SetTuning configures a pitch-correction effect: which notes it may snap
 	// to, and how fast it gets there.
 	SetTuning(ctx context.Context, instrumentID, effectID string, t studio.Tuning) error

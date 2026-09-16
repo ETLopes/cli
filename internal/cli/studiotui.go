@@ -82,6 +82,12 @@ type studioModel struct {
 
 	// connected tracks whether REAPER answered, so the header can say so
 	// rather than leaving the user guessing why nothing is audible.
+	// The console is a grid rather than a list, so it tracks its own cursor:
+	// a column per input and a row per control.
+	conRows []consoleRow
+	conChan int
+	conRow  int
+
 	// fxInstrument is which instrument the FX page is showing. The chains run
 	// to dozens of pedals, so they are paged per instrument rather than
 	// listed end to end.
@@ -115,15 +121,22 @@ func newStudioModel(ctx context.Context, s *studioEnv) studioModel {
 		dirty:   map[string]bool{},
 		rows:    map[string]row{},
 	}
+	m.conRows = consoleRows()
 	m.rebuild()
 	return m
 }
+
+// onConsole reports whether the console page is showing.
+func (m studioModel) onConsole() bool { return m.current().title == consoleTitle }
+
+// consoleTitle names the console page.
+const consoleTitle = "CONSOLE"
 
 // rebuild constructs the tab contents from the session. Rows close over the
 // session, so they always read live values rather than a stale copy.
 func (m *studioModel) rebuild() {
 	session := m.studio.session
-	var tabs []tab
+	tabs := []tab{{title: consoleTitle}}
 
 	for _, bus := range studio.CueBuses() {
 		cueID := bus.CueID
@@ -348,6 +361,10 @@ func (m studioModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if r, ok := m.rows[msg.label]; ok {
 				return m, m.pushRow(r)
 			}
+			// A console label carries its own coordinates.
+			if inst, row, ok := parseConsoleLabel(msg.label, m.conRows); ok {
+				return m, m.pushConsole(inst, row)
+			}
 		}
 		return m, nil
 
@@ -364,6 +381,13 @@ func (m studioModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "q":
 		m.quitting = true
 		return m, tea.Quit
+	}
+
+	if m.onConsole() {
+		return m.handleConsoleKey(msg)
+	}
+
+	switch msg.String() {
 
 	case "tab", "l":
 		m.tabIdx = (m.tabIdx + 1) % len(m.tabs)
@@ -486,6 +510,116 @@ func (m studioModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleConsoleKey drives the desk. Arrows move around the grid and the value
+// keys change what is under the cursor, because left and right are already
+// spent on choosing a channel.
+func (m studioModel) handleConsoleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	instruments := studio.Instruments()
+	if len(instruments) == 0 || len(m.conRows) == 0 {
+		return m, nil
+	}
+
+	notches := 0
+	switch msg.String() {
+	case "left", "h":
+		if m.conChan > 0 {
+			m.conChan--
+		}
+		return m, nil
+	case "right", "l":
+		if m.conChan < len(instruments)-1 {
+			m.conChan++
+		}
+		return m, nil
+	case "up", "k":
+		if m.conRow > 0 {
+			m.conRow--
+		}
+		return m, nil
+	case "down", "j":
+		if m.conRow < len(m.conRows)-1 {
+			m.conRow++
+		}
+		return m, nil
+	case "tab":
+		m.tabIdx = (m.tabIdx + 1) % len(m.tabs)
+		m.cursor, m.offset = 0, 0
+		return m, nil
+	case "shift+tab":
+		m.tabIdx = (m.tabIdx - 1 + len(m.tabs)) % len(m.tabs)
+		m.cursor, m.offset = 0, 0
+		return m, nil
+	case "s":
+		if err := m.studio.store.Save(m.studio.session); err != nil {
+			m.status, m.statusErr = firstLine(err.Error()), true
+		} else {
+			m.status, m.statusErr = "saved "+m.studio.session.Name, false
+		}
+		return m, nil
+	case "r":
+		m.status, m.statusErr = "reconnecting...", false
+		return m, m.connect()
+	case "+", "=":
+		notches = 1
+	case "-", "_":
+		notches = -1
+	case "shift+up", "pgup":
+		notches = 4
+	case "shift+down", "pgdown":
+		notches = -4
+	case " ", "enter":
+		inst := instruments[m.conChan].ID
+		row := m.conRows[m.conRow]
+		msgText, err := toggleConsole(m.studio.session, inst, row)
+		if err != nil {
+			m.status, m.statusErr = firstLine(err.Error()), true
+			return m, nil
+		}
+		if msgText == "" {
+			return m, nil
+		}
+		m.status, m.statusErr = instruments[m.conChan].Name+" "+msgText, false
+		return m, m.pushConsole(inst, row)
+	}
+
+	if notches == 0 {
+		return m, nil
+	}
+	inst := instruments[m.conChan].ID
+	row := m.conRows[m.conRow]
+	if row.isSwitch() {
+		return m, nil
+	}
+	msgText, err := adjustConsole(m.studio.session, inst, row, notches)
+	if err != nil {
+		m.status, m.statusErr = firstLine(err.Error()), true
+		return m, nil
+	}
+	m.status, m.statusErr = instruments[m.conChan].Name+" "+msgText, false
+	return m, m.pushConsole(inst, row)
+}
+
+// pushConsole sends one strip to the workstation, coalescing the way the list
+// pages do so a held key cannot queue a call per press.
+func (m studioModel) pushConsole(instrumentID string, r consoleRow) tea.Cmd {
+	if !m.connected {
+		return nil
+	}
+	label := instrumentID + "/" + r.label()
+	if m.pushing[label] {
+		m.dirty[label] = true
+		return nil
+	}
+	m.pushing[label] = true
+
+	st, ctx := m.studio, m.ctx
+	return func() tea.Msg {
+		c, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		return syncedMsg{label: label, err: syncConsole(c, st.dawc, st.session, instrumentID, r)}
+	}
+}
+
 func (m studioModel) View() tea.View {
 	if m.quitting {
 		return tea.NewView("")
@@ -530,6 +664,23 @@ func (m studioModel) View() tea.View {
 		b.WriteString("   " + ui.Muted.Render("←/→"))
 	}
 	b.WriteString("\n\n")
+
+	if m.onConsole() {
+		b.WriteString(renderConsole(m.studio.session, m.conRows, m.conChan, m.conRow, m.width))
+		b.WriteString("\n")
+		if m.status != "" {
+			if m.statusErr {
+				b.WriteString("  " + ui.Warning(truncate(m.status, max(20, m.width-4))) + "\n")
+			} else {
+				b.WriteString("  " + ui.Muted.Render(truncate(m.status, max(20, m.width-4))) + "\n")
+			}
+		}
+		b.WriteString("\n  " + ui.Muted.Render(
+			"←/→ channel · ↑/↓ control · +/- adjust (shift ×4) · space toggle · tab page · s save · q quit") + "\n")
+		v := tea.NewView(b.String())
+		v.AltScreen = true
+		return v
+	}
 
 	rows := m.current().rows
 	labelWidth := 0

@@ -279,6 +279,27 @@ func (a *Adapter) SetTuning(ctx context.Context, instrumentID, effectID string, 
 	return err
 }
 
+// SetChannel applies a whole channel strip.
+//
+// The strip's tone and dynamics are the channel's own EQ and compressor, not a
+// second set: a desk has one of each per channel, and adding duplicates would
+// stack two EQs on the same signal.
+func (a *Adapter) SetChannel(ctx context.Context, instrumentID string, c studio.Channel) error {
+	in, ok := studio.LookupInstrument(instrumentID)
+	if !ok {
+		return fmt.Errorf("unknown instrument %q", instrumentID)
+	}
+	if err := c.Validate(); err != nil {
+		return fmt.Errorf("%s: %w", in.ID, err)
+	}
+	f := func(v float64) string { return strconv.FormatFloat(v, 'f', 3, 64) }
+	_, err := a.call(ctx, "setchannel", roleOf(in.ID),
+		f(float64(c.Trim)), f(float64(c.EQ.High)), f(float64(c.EQ.Mid)),
+		f(c.EQ.MidFreq), f(float64(c.EQ.Low)), f(float64(c.CompThreshold())),
+		f(c.Pan), f(float64(c.Fader)), boolArg(c.Muted), boolArg(c.Soloed))
+	return err
+}
+
 // SetMonitorVolume sets the control-room level.
 func (a *Adapter) SetMonitorVolume(ctx context.Context, level studio.Level) error {
 	_, err := a.call(ctx, "setmonvol", strconv.FormatFloat(float64(level), 'f', 2, 64))

@@ -505,6 +505,75 @@ function ops.setfxparam(args)
   error("no parameter named " .. tostring(args[3]))
 end
 
+-- ReaEQ stores gain as a linear scalar where 0.25 is unity, so unity sits a
+-- quarter of the way up its range rather than in the middle. Established by
+-- sweeping the parameter and reading back what the plugin reported.
+local EQ_UNITY = 0.25
+
+local function eq_gain(db)
+  if db <= -60 then return 0 end
+  return EQ_UNITY * (10 ^ (db / 20))
+end
+
+-- set_param writes a plugin parameter by name, quietly doing nothing when the
+-- plugin is absent: a strip should still set pan and fader on a channel whose
+-- EQ has never been switched on.
+local function set_param(tr, tag, plugin, name, value)
+  local idx = fx_index(tr, tag, plugin)
+  if idx < 0 then return false end
+  for i = 0, reaper.TrackFX_GetNumParams(tr, idx) - 1 do
+    local _, pname = reaper.TrackFX_GetParamName(tr, idx, i, "")
+    if pname == name then
+      reaper.TrackFX_SetParam(tr, idx, i, value)
+      return true
+    end
+  end
+  return false
+end
+
+-- setchannel applies a whole strip at once. A desk moves as a unit, and one
+-- round trip per knob would make the console feel slow over HTTP.
+function ops.setchannel(args)
+  local role = args[1]
+  local tr = find_managed(role)
+  if not tr then error("no managed track for " .. tostring(role)) end
+
+  local trim    = tonumber(args[2]) or 0
+  local high    = tonumber(args[3]) or 0
+  local mid     = tonumber(args[4]) or 0
+  local midfreq = tonumber(args[5]) or 1000
+  local low     = tonumber(args[6]) or 0
+  local comp    = tonumber(args[7]) or 0
+  local pan     = tonumber(args[8]) or 0
+  local fader   = tonumber(args[9]) or 0
+  local muted   = args[10] == "1"
+  local soloed  = args[11] == "1"
+
+  reaper.SetMediaTrackInfo_Value(tr, "D_VOL", db_to_scalar(fader))
+  reaper.SetMediaTrackInfo_Value(tr, "D_PAN", pan)
+  reaper.SetMediaTrackInfo_Value(tr, "B_MUTE", muted and 1 or 0)
+  reaper.SetMediaTrackInfo_Value(tr, "I_SOLO", soloed and 1 or 0)
+
+  -- The strip's tone controls are the channel's EQ, not a second one.
+  set_param(tr, "cs:eq", "ReaEQ", "Gain-High Shelf 4", eq_gain(high))
+  set_param(tr, "cs:eq", "ReaEQ", "Gain-Band 3", eq_gain(mid))
+  set_param(tr, "cs:eq", "ReaEQ", "Gain-Low Shelf", eq_gain(low))
+  set_param(tr, "cs:eq", "ReaEQ", "Global Gain", eq_gain(trim))
+  -- The frequency sweep is logarithmic about a 40 Hz offset, not a plain log
+  -- between its endpoints. Measured by sweeping the parameter and reading the
+  -- plugin back: a plain log mapping asked for 2 kHz and produced 2.9 kHz.
+  if midfreq > 0 then
+    local offset = 40
+    local lo, hi = 20 + offset, 24000 + offset
+    local norm = math.log((midfreq + offset) / lo) / math.log(hi / lo)
+    if norm < 0 then norm = 0 elseif norm > 1 then norm = 1 end
+    set_param(tr, "cs:eq", "ReaEQ", "Freq-Band 3", norm)
+  end
+
+  set_param(tr, "cs:compressor", "ReaComp", "Threshold", db_to_scalar(comp))
+  return "ok"
+end
+
 function ops.save()
   -- An untitled project is refused rather than saved. REAPER answers a save
   -- on an untitled project with a modal file dialog, which blocks its main
