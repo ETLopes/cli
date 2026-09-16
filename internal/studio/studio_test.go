@@ -264,49 +264,121 @@ func TestEffectToggling(t *testing.T) {
 
 func TestEffectErrorsAreInformative(t *testing.T) {
 	s := NewSession("test")
-	// Guitar has no such effect, but it does have others worth naming.
-	err := s.SetEffect("guitar", "reverb", true)
+	err := s.SetEffect("guitar", "bagpipes", true)
 	if err == nil {
 		t.Fatal("expected an error for an effect not in the chain")
 	}
+	// The message should name what is available rather than just refusing.
 	if !strings.Contains(err.Error(), "overdrive") {
 		t.Errorf("error %q should list the available effects", err)
 	}
 
-	// Keyboard has no chain at all, which is a different message.
-	err = s.SetEffect("keyboard", "overdrive", true)
-	if err == nil {
-		t.Fatal("expected an error for an instrument with no chain")
-	}
-	if !strings.Contains(err.Error(), "no effects") {
-		t.Errorf("error %q should say the instrument has no effects", err)
+	if err := s.SetEffect("trombone", "overdrive", true); err == nil {
+		t.Error("expected an error for an unknown instrument")
 	}
 }
 
-func TestChainsAreInSignalOrder(t *testing.T) {
-	guitar := Chain("guitar")
-	if len(guitar) == 0 {
-		t.Fatal("guitar should have a chain")
-	}
-	// The tuner has to come first: it needs the raw signal, not a distorted one.
-	if guitar[0].ID != "tuner" {
-		t.Errorf("guitar chain starts with %q, want tuner", guitar[0].ID)
-	}
-	var order []string
-	for _, e := range guitar {
-		order = append(order, e.ID)
-	}
-	if strings.Join(order, ",") != "tuner,overdrive,amp,eq,compressor" {
-		t.Errorf("guitar chain = %v, want tuner->overdrive->amp->eq->compressor", order)
+// Order is asserted as relationships rather than an exact list, so adding a
+// pedal does not fail a test that has nothing to say about it. These are the
+// orderings that actually change how the chain sounds.
+func TestChainsFollowPedalboardOrder(t *testing.T) {
+	pos := func(chain []Effect, id string) int {
+		for i, e := range chain {
+			if e.ID == id {
+				return i
+			}
+		}
+		return -1
 	}
 
-	bass := Chain("bass")
-	order = nil
-	for _, e := range bass {
-		order = append(order, e.ID)
+	for _, tc := range []struct {
+		instrument string
+		before     string
+		after      string
+		why        string
+	}{
+		{"guitar", "tuner", "overdrive", "a tuner needs the clean signal"},
+		{"guitar", "compressor", "amp", "dynamics belong in front of the amp"},
+		{"guitar", "overdrive", "gate", "the gate exists to catch what the drive adds"},
+		{"guitar", "amp", "delay", "time effects sit after the amp"},
+		{"guitar", "amp", "reverb", "time effects sit after the amp"},
+		{"guitar", "chorus", "delay", "modulation before delay"},
+		{"bass", "tuner", "compressor", "a tuner needs the clean signal"},
+		{"bass", "compressor", "amp", "dynamics belong in front of the amp"},
+		{"mic1", "compressor", "autotune", "correction tracks a steady level better"},
+		{"mic1", "deesser", "reverb", "tame sibilance before adding space"},
+	} {
+		chain := Chain(tc.instrument)
+		b, a := pos(chain, tc.before), pos(chain, tc.after)
+		if b < 0 || a < 0 {
+			t.Errorf("%s: missing %q or %q", tc.instrument, tc.before, tc.after)
+			continue
+		}
+		if b > a {
+			t.Errorf("%s: %q should come before %q (%s)",
+				tc.instrument, tc.before, tc.after, tc.why)
+		}
 	}
-	if strings.Join(order, ",") != "tuner,compressor,amp,eq" {
-		t.Errorf("bass chain = %v, want tuner->compressor->amp->eq", order)
+}
+
+// A chain that switched anything on by default would be a wall of sound the
+// moment an instrument was plugged in.
+func TestEverythingStartsOff(t *testing.T) {
+	s := NewSession("test")
+	for _, in := range Instruments() {
+		for _, e := range Chain(in.ID) {
+			if s.EffectEnabled(in.ID, e.ID) {
+				t.Errorf("%s %s starts enabled; it should not", in.ID, e.ID)
+			}
+		}
+	}
+}
+
+// Both microphones must offer the same chain, so either can take a lead vocal.
+func TestBothMicrophonesShareAChain(t *testing.T) {
+	a, b := Chain("mic1"), Chain("mic2")
+	if len(a) != len(b) {
+		t.Fatalf("mic1 has %d effects, mic2 has %d", len(a), len(b))
+	}
+	for i := range a {
+		if a[i].ID != b[i].ID {
+			t.Errorf("position %d: mic1 has %q, mic2 has %q", i, a[i].ID, b[i].ID)
+		}
+	}
+}
+
+// Several chains hold more than one instance of the same plugin -- a vocal has
+// three ReaTune instances -- so effect IDs must be unique within a chain or
+// they cannot be told apart in REAPER.
+func TestEffectIDsAreUniqueWithinAChain(t *testing.T) {
+	for _, in := range Instruments() {
+		seen := map[string]bool{}
+		for _, e := range Chain(in.ID) {
+			if seen[e.ID] {
+				t.Errorf("%s has two effects with ID %q", in.ID, e.ID)
+			}
+			seen[e.ID] = true
+			if e.Plugin == "" {
+				t.Errorf("%s %s has no plugin", in.ID, e.ID)
+			}
+		}
+	}
+}
+
+// An effect this program cannot fully configure must say so, or the player is
+// left wondering why switching it on changed nothing.
+func TestUnconfigurableEffectsExplainThemselves(t *testing.T) {
+	for _, in := range Instruments() {
+		for _, e := range Chain(in.ID) {
+			if e.ID == "hardtune" || e.ID == "autotune" {
+				if e.NeedsSetup == "" {
+					t.Errorf("%s %s needs setup notes", in.ID, e.ID)
+				}
+			}
+			if e.ID == "amp" && !e.NeedsIR {
+				t.Errorf("%s amp is a convolution modeler and should be marked NeedsIR", in.ID)
+			}
+		}
 	}
 }
 
@@ -386,7 +458,7 @@ func TestUnmarshalRejectsUnsafeValues(t *testing.T) {
 		},
 		{
 			"unknown effect",
-			"session:\n  name: x\nfx:\n  guitar:\n    reverb: true\n",
+			"session:\n  name: x\nfx:\n  guitar:\n    bagpipes: true\n",
 			"no effect",
 		},
 	}

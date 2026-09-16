@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/ETLopes/cli/internal/daw"
 	"github.com/ETLopes/cli/internal/studio"
@@ -55,7 +56,10 @@ const (
 // row is one editable control.
 type row struct {
 	label string
-	kind  rowKind
+	// note is a short caveat shown beside the control, for effects that will
+	// not do anything audible until configured.
+	note string
+	kind rowKind
 	// value renders the current setting.
 	value func() string
 	// on reports switch state, for toggle rows.
@@ -78,6 +82,15 @@ type studioModel struct {
 
 	// connected tracks whether REAPER answered, so the header can say so
 	// rather than leaving the user guessing why nothing is audible.
+	// fxInstrument is which instrument the FX page is showing. The chains run
+	// to dozens of pedals, so they are paged per instrument rather than
+	// listed end to end.
+	fxInstrument int
+	// offset is the first visible row, so a long chain scrolls instead of
+	// running off the screen.
+	offset int
+	height int
+
 	connected bool
 	dawName   string
 	status    string
@@ -97,7 +110,7 @@ type studioModel struct {
 
 func newStudioModel(ctx context.Context, s *studioEnv) studioModel {
 	m := studioModel{
-		ctx: ctx, studio: s, width: 90,
+		ctx: ctx, studio: s, width: 90, height: 30,
 		pushing: map[string]bool{},
 		dirty:   map[string]bool{},
 		rows:    map[string]row{},
@@ -144,12 +157,16 @@ func (m *studioModel) rebuild() {
 	}
 
 	fx := tab{title: "FX"}
-	for _, id := range studio.InstrumentsWithChains() {
-		inst, _ := studio.LookupInstrument(id)
+	if withChains := studio.InstrumentsWithChains(); len(withChains) > 0 {
+		if m.fxInstrument >= len(withChains) {
+			m.fxInstrument = 0
+		}
+		id := withChains[m.fxInstrument]
 		for _, e := range studio.Chain(id) {
 			instID, eff := id, e
 			fx.rows = append(fx.rows, row{
-				label: inst.Name + "  " + eff.Name,
+				label: eff.Name,
+				note:  effectNote(eff),
 				kind:  rowToggle,
 				on:    func() bool { return session.EffectEnabled(instID, eff.ID) },
 				value: func() string { return onOffLabel(session.EffectEnabled(instID, eff.ID)) },
@@ -197,6 +214,35 @@ func (m *studioModel) rebuild() {
 		}
 	}
 }
+
+// truncate shortens a line to fit the terminal, measuring display width so a
+// styled string is not cut mid-escape.
+func truncate(s string, width int) string {
+	if lipgloss.Width(s) <= width || width < 2 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= width {
+		return s
+	}
+	return string(r[:width-1]) + "…"
+}
+
+// effectNote explains, briefly, why an effect might not appear to do anything
+// once switched on. Silence on that point is what sent the last hour into
+// diagnosing a tuner that was working the whole time.
+func effectNote(e studio.Effect) string {
+	switch {
+	case e.NeedsIR:
+		return "loads clean until you load a cab impulse response"
+	case e.NeedsSetup != "":
+		return "needs one-time setup in its window"
+	}
+	return ""
+}
+
+// fxInstruments lists the instruments the FX page can show.
+func fxInstruments() []string { return studio.InstrumentsWithChains() }
 
 type connectedMsg struct {
 	info daw.Info
@@ -249,10 +295,35 @@ func (m studioModel) pushRow(r row) tea.Cmd {
 
 func (m studioModel) current() *tab { return &m.tabs[m.tabIdx] }
 
+// visibleRows is how many controls fit on screen, once the header, the tab
+// bar, the status line and the key hints have taken their share.
+func (m studioModel) visibleRows() int {
+	const chrome = 12
+	if n := m.height - chrome; n > 3 {
+		return n
+	}
+	return 3
+}
+
+// scrollToCursor keeps the selected row on screen.
+func (m *studioModel) scrollToCursor() {
+	visible := m.visibleRows()
+	if m.cursor < m.offset {
+		m.offset = m.cursor
+	}
+	if m.cursor >= m.offset+visible {
+		m.offset = m.cursor - visible + 1
+	}
+	if m.offset < 0 {
+		m.offset = 0
+	}
+}
+
 func (m studioModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
+		m.width, m.height = msg.Width, msg.Height
+		m.scrollToCursor()
 		return m, nil
 
 	case connectedMsg:
@@ -296,27 +367,52 @@ func (m studioModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.quitting = true
 		return m, tea.Quit
 
-	case "tab", "right shift", "l":
+	case "tab", "l":
 		m.tabIdx = (m.tabIdx + 1) % len(m.tabs)
-		m.cursor = 0
+		m.cursor, m.offset = 0, 0
 		return m, nil
 	case "shift+tab", "h":
 		m.tabIdx = (m.tabIdx - 1 + len(m.tabs)) % len(m.tabs)
-		m.cursor = 0
+		m.cursor, m.offset = 0, 0
 		return m, nil
 
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
 		}
+		m.scrollToCursor()
 		return m, nil
 	case "down", "j":
 		if m.cursor < len(rows)-1 {
 			m.cursor++
 		}
+		m.scrollToCursor()
+		return m, nil
+	case "pgup":
+		m.cursor = max(0, m.cursor-m.visibleRows())
+		m.scrollToCursor()
+		return m, nil
+	case "pgdown":
+		m.cursor = min(len(rows)-1, m.cursor+m.visibleRows())
+		m.scrollToCursor()
 		return m, nil
 
 	case "left", "right", "shift+left", "shift+right":
+		// On the FX page nothing is a level, so the same keys page between
+		// instruments instead of going unused.
+		if m.current().title == "FX" {
+			insts := fxInstruments()
+			if len(insts) > 0 {
+				if strings.HasSuffix(msg.String(), "left") {
+					m.fxInstrument = (m.fxInstrument - 1 + len(insts)) % len(insts)
+				} else {
+					m.fxInstrument = (m.fxInstrument + 1) % len(insts)
+				}
+				m.cursor, m.offset = 0, 0
+				m.rebuild()
+			}
+			return m, nil
+		}
 		if len(rows) == 0 {
 			return m, nil
 		}
@@ -401,8 +497,8 @@ func (m studioModel) View() tea.View {
 	b.WriteString("  " + ui.Title.Render("STUDIO") + "  " +
 		ui.Heading.Render(m.studio.session.Name))
 
-	// Connection state belongs in the header: without it, a mixer that silently
-	// changes nothing looks identical to one that is working.
+	// Connection state belongs in the header: without it, a mixer that
+	// silently changes nothing looks identical to one that is working.
 	if m.connected {
 		b.WriteString("   " + ui.OK.Render("● "+m.dawName))
 	} else {
@@ -419,17 +515,41 @@ func (m studioModel) View() tea.View {
 			b.WriteString(ui.Muted.Render(label))
 		}
 	}
+	b.WriteString("\n")
+
+	onFX := m.current().title == "FX"
+	if onFX {
+		b.WriteString("\n  ")
+		for i, id := range fxInstruments() {
+			inst, _ := studio.LookupInstrument(id)
+			name := " " + inst.Name + " "
+			if i == m.fxInstrument {
+				b.WriteString(ui.Accent.Bold(true).Render(name))
+			} else {
+				b.WriteString(ui.Muted.Render(name))
+			}
+		}
+		b.WriteString("   " + ui.Muted.Render("←/→"))
+	}
 	b.WriteString("\n\n")
 
 	rows := m.current().rows
 	labelWidth := 0
 	for _, r := range rows {
-		if n := len(r.label); n > labelWidth {
+		if n := lipgloss.Width(r.label); n > labelWidth {
 			labelWidth = n
 		}
 	}
 
-	for i, r := range rows {
+	visible := m.visibleRows()
+	first, last := m.offset, min(m.offset+visible, len(rows))
+
+	if first > 0 {
+		b.WriteString("  " + ui.Muted.Render(fmt.Sprintf("     ↑ %d more", first)) + "\n")
+	}
+
+	for i := first; i < last; i++ {
+		r := rows[i]
 		marker := "   "
 		label := ui.Pad(r.label, labelWidth)
 		if i == m.cursor {
@@ -444,25 +564,39 @@ func (m studioModel) View() tea.View {
 			b.WriteString(levelBar(r))
 		case rowToggle:
 			if r.on != nil && r.on() {
-				b.WriteString(ui.OK.Render("● " + r.value()))
+				b.WriteString(ui.OK.Render("● " + ui.Pad(r.value(), 4)))
 			} else {
-				b.WriteString(ui.Muted.Render("○ " + r.value()))
+				b.WriteString(ui.Muted.Render("○ " + ui.Pad(r.value(), 4)))
+			}
+			// A caveat only matters for something switched on that still
+			// appears to do nothing.
+			if r.note != "" && r.on != nil && r.on() {
+				b.WriteString("  " + ui.Warn.Render(r.note))
+			} else if r.note != "" {
+				b.WriteString("  " + ui.Muted.Render(r.note))
 			}
 		}
 		b.WriteString("\n")
 	}
 
+	if last < len(rows) {
+		b.WriteString("  " + ui.Muted.Render(fmt.Sprintf("     ↓ %d more", len(rows)-last)) + "\n")
+	}
+
 	b.WriteString("\n")
 	if m.status != "" {
 		if m.statusErr {
-			b.WriteString("  " + ui.Warning(m.status) + "\n")
+			b.WriteString("  " + ui.Warning(truncate(m.status, max(20, m.width-4))) + "\n")
 		} else {
-			b.WriteString("  " + ui.Muted.Render(m.status) + "\n")
+			b.WriteString("  " + ui.Muted.Render(truncate(m.status, max(20, m.width-4))) + "\n")
 		}
 	}
 
-	b.WriteString("\n  " + ui.Muted.Render(
-		"↑/↓ select · ←/→ adjust (shift for ±3) · space toggle · 1-6 tabs · s save · r reconnect · q quit") + "\n")
+	hint := "↑/↓ select · ←/→ adjust · space toggle · tab page · s save · r reconnect · q quit"
+	if onFX {
+		hint = "↑/↓ select · ←/→ instrument · space toggle · tab page · s save · q quit"
+	}
+	b.WriteString("\n  " + ui.Muted.Render(hint) + "\n")
 
 	// The mixer owns the screen while it runs, so it draws on the alternate
 	// buffer and leaves the user's scrollback intact on exit.

@@ -161,11 +161,24 @@ local function ensure_input(tr, channel)
   return changed
 end
 
--- fx_index finds a named effect on a track, or -1.
-local function fx_index(tr, name)
+-- Each managed plugin instance is renamed to a stable tag, because a chain
+-- can hold several instances of one plugin -- a vocal has a tuner, a pitch
+-- corrector and a hard-tuned corrector, all of which are ReaTune -- and
+-- matching on the plugin name would find whichever came first every time.
+local function fx_tag(effect_id) return "cs:" .. effect_id end
+
+-- fx_index finds a managed effect by its tag, falling back to the plugin name
+-- so instances created before tagging are still found and can be adopted.
+local function fx_index(tr, tag, plugin)
   for i = 0, reaper.TrackFX_GetCount(tr) - 1 do
     local _, fxname = reaper.TrackFX_GetFXName(tr, i, "")
-    if fxname:find(name, 1, true) then return i end
+    if tag ~= nil and tag ~= "" and fxname:find(tag, 1, true) then return i end
+  end
+  if plugin and plugin ~= "" then
+    for i = 0, reaper.TrackFX_GetCount(tr) - 1 do
+      local _, fxname = reaper.TrackFX_GetFXName(tr, i, "")
+      if fxname:find(plugin, 1, true) then return i end
+    end
   end
   return -1
 end
@@ -274,10 +287,13 @@ function ops.setfx(args)
   local inst_role, plugin, enabled = args[1], args[2], args[3] == "1"
   -- shows_ui marks an effect that exists to be looked at, such as a tuner.
   local shows_ui = args[4] == "1"
+  local effect_id = args[6] or ""
+  local tag = effect_id ~= "" and fx_tag(effect_id) or ""
+
   local tr = find_managed(inst_role)
   if not tr then error("no managed track for " .. inst_role) end
 
-  local idx = fx_index(tr, plugin)
+  local idx = fx_index(tr, tag, plugin)
   local created = false
   if idx < 0 then
     if not enabled then return "absent" end
@@ -286,6 +302,11 @@ function ops.setfx(args)
       error("plugin not found: " .. plugin)
     end
     created = true
+  end
+  -- Tag the instance so it can be found again regardless of how many copies
+  -- of the same plugin the chain holds.
+  if tag ~= "" then
+    reaper.TrackFX_SetNamedConfigParm(tr, idx, "renamed_name", tag)
   end
   reaper.TrackFX_SetEnabled(tr, idx, enabled)
 
@@ -380,7 +401,7 @@ end
 function ops.fxparams(args)
   local tr = find_managed(args[1])
   if not tr then error("no managed track for " .. tostring(args[1])) end
-  local idx = fx_index(tr, args[2])
+  local idx = fx_index(tr, args[2], args[2])
   if idx < 0 then error("plugin not on track: " .. tostring(args[2])) end
 
   local out = {}
@@ -401,7 +422,7 @@ end
 function ops.fxconfig(args)
   local tr = find_managed(args[1])
   if not tr then error("no managed track for " .. tostring(args[1])) end
-  local idx = fx_index(tr, args[2])
+  local idx = fx_index(tr, args[2], args[2])
   if idx < 0 then error("plugin not on track: " .. tostring(args[2])) end
 
   local out = {}
@@ -421,7 +442,7 @@ end
 function ops.setfxconfig(args)
   local tr = find_managed(args[1])
   if not tr then error("no managed track for " .. tostring(args[1])) end
-  local idx = fx_index(tr, args[2])
+  local idx = fx_index(tr, args[2], args[2])
   if idx < 0 then error("plugin not on track: " .. tostring(args[2])) end
   local ok = reaper.TrackFX_SetNamedConfigParm(tr, idx, args[3], args[4])
   local _, now = reaper.TrackFX_GetNamedConfigParm(tr, idx, args[3])
@@ -441,7 +462,7 @@ end
 function ops.delfx(args)
   local tr = find_managed(args[1])
   if not tr then error("no managed track for " .. tostring(args[1])) end
-  local idx = fx_index(tr, args[2])
+  local idx = fx_index(tr, args[2], args[2])
   if idx < 0 then return "absent" end
   reaper.TrackFX_Delete(tr, idx)
   return "deleted"
@@ -470,7 +491,7 @@ end
 function ops.setfxparam(args)
   local tr = find_managed(args[1])
   if not tr then error("no managed track for " .. tostring(args[1])) end
-  local idx = fx_index(tr, args[2])
+  local idx = fx_index(tr, args[2], args[2])
   if idx < 0 then error("plugin not on track: " .. tostring(args[2])) end
 
   for i = 0, reaper.TrackFX_GetNumParams(tr, idx) - 1 do

@@ -30,6 +30,13 @@ type Effect struct {
 	// audibly doing its job, and are applied only on creation so later
 	// adjustments are never overwritten.
 	Initial []ParamDefault
+	// NeedsIR marks a convolution effect that stays transparent until an
+	// impulse response is loaded, so the interface can say so rather than
+	// leaving the player wondering why an amp changed nothing.
+	NeedsIR bool
+	// NeedsSetup describes a one-time configuration this program cannot
+	// perform, empty when there is none.
+	NeedsSetup string
 	// ShowsUI marks an effect whose whole purpose is its display. A tuner
 	// processes nothing audible; enabling it without opening its window
 	// accomplishes nothing a player can use, so the window is opened with it
@@ -52,34 +59,110 @@ func DBScalar(db float64) float64 { return math.Pow(10, db/20) }
 
 // chains maps an instrument ID to its processing chain, in signal order.
 //
-// The raw input is always what gets recorded; these effects exist so the
-// player hears a usable tone while tracking. That keeps a clean DI on disk and
-// leaves the tone free to change afterwards.
+// Order is the order of a real pedalboard, because that is what makes the
+// sound people expect: tuner first so it sees a clean signal, dynamics and
+// dirt before the amp, modulation and time effects after it, and the gate
+// placed where it can catch the noise the drive created.
+//
+// Everything starts switched off. A chain this long would otherwise be a wall
+// of sound the moment an instrument was plugged in.
 var chains = map[string][]Effect{
 	"guitar": {
 		{ID: "tuner", Name: "Tuner", Label: "TUN", Plugin: "ReaTune", ShowsUI: true},
-		{ID: "overdrive", Name: "Overdrive", Label: "OD", Plugin: "JS: Distortion"},
-		{ID: "amp", Name: "Amp Simulator", Label: "AMP", Plugin: "JS: Convolution Amp/Cab Modeler"},
-		{ID: "eq", Name: "EQ", Label: "EQ", Plugin: "ReaEQ"},
-		{ID: "compressor", Name: "Compressor", Label: "COMP", Plugin: "ReaComp",
+		{ID: "wah", Name: "Wah", Label: "WAH", Plugin: "JS: Wah-Wah"},
+		{ID: "octavedown", Name: "Octave Down", Label: "OCT-", Plugin: "JS: Pitch an Octave Down"},
+		{ID: "octaveup", Name: "Octave Up", Label: "OCT+", Plugin: "JS: Pitch an Octave Up"},
+		{ID: "compressor", Name: "Compressor", Label: "CMP", Plugin: "ReaComp",
 			Initial: []ParamDefault{{Name: "Threshold", Value: DBScalar(-18)}}},
+		{ID: "overdrive", Name: "Overdrive", Label: "OD", Plugin: "JS: Distortion"},
+		{ID: "fuzz", Name: "Fuzz", Label: "FUZZ", Plugin: "JS: Distortion (Fuzz)"},
+		{ID: "saturation", Name: "Saturation", Label: "SAT", Plugin: "JS: Saturation"},
+		{ID: "clipper", Name: "Clipper", Label: "CLIP", Plugin: "JS: Soft Clipper/Limiter"},
+		// After the dirt: a gate before it would only mute a clean signal,
+		// while the hiss worth removing is what the drive adds.
+		{ID: "gate", Name: "Noise Gate", Label: "GATE", Plugin: "ReaGate"},
+		{ID: "amp", Name: "Amp / Cab", Label: "AMP", Plugin: "JS: Convolution Amp/Cab Modeler", NeedsIR: true},
+		{ID: "eq", Name: "EQ", Label: "EQ", Plugin: "ReaEQ"},
+		{ID: "chorus", Name: "Chorus", Label: "CHO", Plugin: "JS: Chorus (Stereo)"},
+		{ID: "flanger", Name: "Flanger", Label: "FLG", Plugin: "JS: Flanger"},
+		{ID: "phaser", Name: "Phaser", Label: "PHA", Plugin: "JS: 4-Tap Phaser"},
+		{ID: "tremolo", Name: "Tremolo", Label: "TRM", Plugin: "JS: Tremolo"},
+		{ID: "delay", Name: "Delay", Label: "DLY", Plugin: "JS: Delay w/Tempo Length"},
+		{ID: "pingpong", Name: "Ping-Pong Delay", Label: "PPD", Plugin: "JS: Delay w/Tempo Ping-Pong"},
+		{ID: "reverb", Name: "Reverb", Label: "REV", Plugin: "ReaVerbate"},
 	},
 	"bass": {
 		{ID: "tuner", Name: "Tuner", Label: "TUN", Plugin: "ReaTune", ShowsUI: true},
-		{ID: "compressor", Name: "Compressor", Label: "COMP", Plugin: "ReaComp",
-			// Bass sits under a hand rather than a pick most of the time, so
-			// a gentle, fairly low threshold evens it out without pumping.
+		{ID: "gate", Name: "Noise Gate", Label: "GATE", Plugin: "ReaGate"},
+		{ID: "octavedown", Name: "Octave Down", Label: "OCT-", Plugin: "JS: Pitch an Octave Down"},
+		{ID: "compressor", Name: "Compressor", Label: "CMP", Plugin: "ReaComp",
+			// Bass is usually played with fingers, so a low threshold and a
+			// gentle ratio even it out without audible pumping.
 			Initial: []ParamDefault{{Name: "Threshold", Value: DBScalar(-18)}}},
-		{ID: "amp", Name: "Bass Amp", Label: "AMP", Plugin: "JS: Convolution Amp/Cab Modeler"},
+		{ID: "comp1175", Name: "1175 Compressor", Label: "1175", Plugin: "JS: 1175 Compressor"},
+		{ID: "comptom", Name: "Major Tom Compressor", Label: "TOM", Plugin: "JS: Major Tom Compressor"},
+		{ID: "drive", Name: "Drive", Label: "DRV", Plugin: "JS: Distortion"},
+		{ID: "saturation", Name: "Saturation", Label: "SAT", Plugin: "JS: Saturation"},
+		{ID: "clipper", Name: "Clipper", Label: "CLIP", Plugin: "JS: Soft Clipper/Limiter"},
+		{ID: "amp", Name: "Bass Amp / Cab", Label: "AMP", Plugin: "JS: Convolution Amp/Cab Modeler", NeedsIR: true},
+		{ID: "lowboost", Name: "Low Boost", Label: "LOW", Plugin: "JS: Bass Manager/Booster"},
+		{ID: "chorus", Name: "Chorus", Label: "CHO", Plugin: "JS: Chorus (Stereo)"},
 		{ID: "eq", Name: "EQ", Label: "EQ", Plugin: "ReaEQ"},
 	},
-	// Microphones, keyboard and drums carry no mandatory processing. They
-	// still accept a chain, so adding one later is a change here alone.
-	"mic1":     {},
-	"mic2":     {},
-	"keyboard": {},
-	"dtx":      {},
+	// Both microphones get the same chain, so either can take a lead vocal.
+	"mic1": vocalChain(),
+	"mic2": vocalChain(),
+	"keyboard": {
+		{ID: "compressor", Name: "Compressor", Label: "CMP", Plugin: "ReaComp",
+			Initial: []ParamDefault{{Name: "Threshold", Value: DBScalar(-18)}}},
+		{ID: "saturation", Name: "Saturation", Label: "SAT", Plugin: "JS: Saturation"},
+		{ID: "eq", Name: "EQ", Label: "EQ", Plugin: "ReaEQ"},
+		{ID: "chorus", Name: "Chorus", Label: "CHO", Plugin: "JS: Chorus (Stereo)"},
+		{ID: "delay", Name: "Delay", Label: "DLY", Plugin: "JS: Delay w/Tempo Length"},
+		{ID: "lofidelay", Name: "Lo-Fi Delay", Label: "LOFI", Plugin: "JS: Delay (Lo-Fi)"},
+		{ID: "reverb", Name: "Reverb", Label: "REV", Plugin: "ReaVerbate"},
+	},
+	"dtx": {
+		{ID: "gate", Name: "Noise Gate", Label: "GATE", Plugin: "ReaGate"},
+		{ID: "compressor", Name: "Drum Compressor", Label: "CMP", Plugin: "JS: Digital Drum Compressor"},
+		{ID: "eq", Name: "EQ", Label: "EQ", Plugin: "ReaEQ"},
+		{ID: "reverb", Name: "Room Reverb", Label: "REV", Plugin: "ReaVerbate"},
+	},
 }
+
+// vocalChain is shared by both microphones.
+//
+// Dynamics come before pitch correction: a corrector tracks a steady level far
+// better than one that lurches, so compressing first makes the tuning follow
+// the voice instead of chasing it.
+func vocalChain() []Effect {
+	return []Effect{
+		{ID: "tuner", Name: "Tuner", Label: "TUN", Plugin: "ReaTune", ShowsUI: true},
+		{ID: "gate", Name: "Noise Gate", Label: "GATE", Plugin: "ReaGate"},
+		{ID: "compressor", Name: "Compressor", Label: "CMP", Plugin: "ReaComp",
+			Initial: []ParamDefault{{Name: "Threshold", Value: DBScalar(-18)}}},
+		{ID: "deesser", Name: "De-esser", Label: "DES", Plugin: "JS: De-esser"},
+		{ID: "autotune", Name: "Auto-Tune", Label: "AUTO", Plugin: "ReaTune", ShowsUI: true, NeedsSetup: correctionSetup},
+		{ID: "hardtune", Name: "Hard Tune", Label: "HARD", Plugin: "ReaTune", ShowsUI: true, NeedsSetup: hardTuneSetup},
+		{ID: "harmony", Name: "Harmony", Label: "HARM", Plugin: "ReaPitch"},
+		{ID: "eq", Name: "EQ", Label: "EQ", Plugin: "ReaEQ"},
+		{ID: "delay", Name: "Delay", Label: "DLY", Plugin: "JS: Delay w/Tempo Length"},
+		{ID: "reverb", Name: "Reverb", Label: "REV", Plugin: "ReaVerbate"},
+		{ID: "vocoder", Name: "Vocoder", Label: "VOC", Plugin: "ReaVocode"},
+	}
+}
+
+// Setup notes for effects REAPER cannot configure from outside. ReaTune
+// exposes only Bypass, Wet and Delta as automatable parameters, so its
+// correction settings have to be set once in its window; they then persist
+// with the project.
+const (
+	correctionSetup = "open the Correction tab and enable correction; " +
+		"pick the song's key and scale"
+	hardTuneSetup = "open the Correction tab, set retune speed to 0 ms and " +
+		"snap to the song's key: that instant snapping is what makes the " +
+		"heavily-quantised vocal effect"
+)
 
 // Chain returns an instrument's effect chain in signal order.
 func Chain(instrumentID string) []Effect {

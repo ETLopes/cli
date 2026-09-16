@@ -33,6 +33,9 @@ const (
 	// still finishes well inside this.
 	bridgeTimeout = 10 * time.Second
 
+	// tagPrefix marks a plugin instance this program manages.
+	tagPrefix = "cs:"
+
 	// bridgeActionID is the command ID the bridge is registered under in
 	// reaper-kb.ini. It is fixed rather than generated so an upgrade reuses
 	// the same registration instead of accumulating duplicates.
@@ -167,6 +170,10 @@ func (a *Adapter) callWithTimeout(ctx context.Context, timeout time.Duration, op
 	}
 }
 
+// effectTag is the name a managed plugin instance is renamed to, mirroring
+// fx_tag in the bridge.
+func effectTag(effectID string) string { return tagPrefix + effectID }
+
 // roleOf is the stable identifier written into each managed track. Tracks are
 // found by this tag rather than by index or name, so reordering or renaming a
 // track in REAPER does not detach it from the studio.
@@ -241,7 +248,7 @@ func (a *Adapter) SetEffect(ctx context.Context, instrumentID, effectID string, 
 		initial = append(initial, fmt.Sprintf("%s=%g", p.Name, p.Value))
 	}
 	_, err := a.call(ctx, "setfx", roleOf(in.ID), eff.Plugin,
-		boolArg(enabled), boolArg(eff.ShowsUI), strings.Join(initial, ","))
+		boolArg(enabled), boolArg(eff.ShowsUI), strings.Join(initial, ","), eff.ID)
 	return err
 }
 
@@ -329,12 +336,22 @@ func applySnapshotEntry(s *studio.Session, entry string) error {
 		if len(f) < 4 {
 			return nil
 		}
-		// Map the plugin REAPER reports back to a studio effect, ignoring any
-		// the studio does not manage.
+		// Managed instances are tagged, which is the only way to tell apart
+		// several copies of one plugin: a vocal chain holds three ReaTune
+		// instances. Untagged instances are matched by plugin name so
+		// anything created before tagging is still recognised.
 		for _, eff := range studio.Chain(f[1]) {
-			if strings.Contains(f[2], eff.Plugin) || strings.Contains(eff.Plugin, f[2]) {
+			if f[2] == effectTag(eff.ID) {
 				_ = s.SetEffect(f[1], eff.ID, f[3] == "1")
 				break
+			}
+		}
+		if !strings.HasPrefix(f[2], tagPrefix) {
+			for _, eff := range studio.Chain(f[1]) {
+				if strings.Contains(f[2], eff.Plugin) {
+					_ = s.SetEffect(f[1], eff.ID, f[3] == "1")
+					break
+				}
 			}
 		}
 	}
