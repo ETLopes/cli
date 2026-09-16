@@ -78,9 +78,13 @@ Tools:
 			return e.setup(cmd, cfgFile)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// With no tool named there is nothing to run, so list what is
-			// available rather than failing.
-			return cmd.Help()
+			// With no tool named, offer the launcher. Without a terminal to
+			// drive it there is nothing to select with, so fall back to the
+			// help text, which keeps `cli | cat` and scripts working.
+			if !e.interactive() {
+				return cmd.Help()
+			}
+			return runLauncher(cmd.Context(), e)
 		},
 	}
 
