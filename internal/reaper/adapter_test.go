@@ -182,9 +182,9 @@ func TestSetupSendsFullTopology(t *testing.T) {
 			t.Errorf("instrument spec missing %q; got %q", want, gotInstruments)
 		}
 	}
-	// Buses are sent as zero-based left channels: MAIN on 0 (outputs 1/2),
-	// cue 1 on 2 (outputs 3/4).
-	for _, want := range []string{"main:MAIN:0", "cue1:CUE 1:2", "cue4:CUE 4:8"} {
+	// Buses are sent as zero-based channels with a mono flag: MAIN stereo on
+	// 0 (outputs 1/2), and each cue mono on its own output.
+	for _, want := range []string{"main:MAIN:0:0", "cue1:CUE 1:2:1", "cue8:CUE 8:9:1"} {
 		if !strings.Contains(gotBuses, want) {
 			t.Errorf("bus spec missing %q; got %q", want, gotBuses)
 		}

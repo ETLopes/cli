@@ -328,11 +328,66 @@ func (m studioModel) current() *tab { return &m.tabs[m.tabIdx] }
 // visibleRows is how many controls fit on screen, once the header, the tab
 // bar, the status line and the key hints have taken their share.
 func (m studioModel) visibleRows() int {
-	const chrome = 12
+	// A tab bar wide enough to wrap costs a line for every row past the first.
+	chrome := 12 + max(1, len(tabLayout(m.tabs, m.width))) - 1
 	if n := m.height - chrome; n > 3 {
 		return n
 	}
 	return 3
+}
+
+// tabIndent is the left margin every page shares.
+const tabIndent = "  "
+
+// tabLabel is how one page reads in the tab bar. Only the first nine are
+// numbered, because only those nine have a digit that jumps to them.
+func tabLabel(t tab, i int) string {
+	if i < 9 {
+		return fmt.Sprintf(" %d %s ", i+1, t.title)
+	}
+	return " " + t.title + " "
+}
+
+// tabLayout groups the pages into the lines they occupy at a given width,
+// each line holding the indices of the tabs on it. Eight cue pages do not fit
+// beside the others on a narrow terminal, so the bar wraps rather than
+// spilling off the edge.
+func tabLayout(tabs []tab, width int) [][]int {
+	avail := max(20, width-len(tabIndent))
+	var lines [][]int
+	var line []int
+	used := 0
+	for i, t := range tabs {
+		w := lipgloss.Width(tabLabel(t, i))
+		if len(line) > 0 && used+w > avail {
+			lines = append(lines, line)
+			line, used = nil, 0
+		}
+		line = append(line, i)
+		used += w
+	}
+	if len(line) > 0 {
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// renderTabs draws the tab bar, highlighting the active page.
+func renderTabs(tabs []tab, active, width int) string {
+	var b strings.Builder
+	for _, line := range tabLayout(tabs, width) {
+		b.WriteString(tabIndent)
+		for _, i := range line {
+			label := tabLabel(tabs[i], i)
+			if i == active {
+				b.WriteString(ui.Accent.Bold(true).Render(label))
+			} else {
+				b.WriteString(ui.Muted.Render(label))
+			}
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 // scrollToCursor keeps the selected row on screen.
@@ -749,16 +804,7 @@ func (m studioModel) View() tea.View {
 	}
 	b.WriteString("\n\n")
 
-	b.WriteString("  ")
-	for i, t := range m.tabs {
-		label := fmt.Sprintf(" %d %s ", i+1, t.title)
-		if i == m.tabIdx {
-			b.WriteString(ui.Accent.Bold(true).Render(label))
-		} else {
-			b.WriteString(ui.Muted.Render(label))
-		}
-	}
-	b.WriteString("\n")
+	b.WriteString(renderTabs(m.tabs, m.tabIdx, m.width))
 
 	onFX := m.current().title == "FX"
 	if onFX {

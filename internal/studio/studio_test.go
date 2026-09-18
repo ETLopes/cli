@@ -41,17 +41,48 @@ func TestTopologyMatchesTheRig(t *testing.T) {
 }
 
 func TestBusOutputsMatchTheInterface(t *testing.T) {
+	// The monitors are stereo; the headphone amplifier takes one input per
+	// channel, so each cue is a single output and there are eight of them.
 	if got := MainBus().Output.String(); got != "1/2" {
 		t.Errorf("MAIN feeds %s, want 1/2 (the monitors)", got)
 	}
-	want := map[int]string{1: "3/4", 2: "5/6", 3: "7/8", 4: "9/10"}
-	for cueID, outputs := range want {
-		bus, ok := LookupCue(cueID)
-		if !ok {
-			t.Fatalf("cue %d is missing", cueID)
+	if MainBus().Output.Mono() {
+		t.Error("the control room should be stereo")
+	}
+
+	cues := CueBuses()
+	if len(cues) != 8 {
+		t.Fatalf("got %d cue mixes, want 8 (one per headphone channel)", len(cues))
+	}
+	for i, bus := range cues {
+		wantChannel := 3 + i
+		if !bus.Output.Mono() {
+			t.Errorf("CUE %d is stereo; each headphone channel takes one input", bus.CueID)
 		}
-		if got := bus.Output.String(); got != outputs {
-			t.Errorf("CUE %d feeds %s, want %s", cueID, got, outputs)
+		if bus.Output.Left != wantChannel {
+			t.Errorf("CUE %d feeds output %d, want %d", bus.CueID, bus.Output.Left, wantChannel)
+		}
+		if bus.CueID != i+1 {
+			t.Errorf("cue at position %d is numbered %d", i+1, bus.CueID)
+		}
+	}
+}
+
+// Every output is used once: the monitors take 1/2 and the eight cues take
+// 3 through 10, which is the whole interface.
+func TestOutputsCoverTheInterfaceWithoutOverlap(t *testing.T) {
+	seen := map[int]string{}
+	for _, b := range Buses() {
+		for _, ch := range b.Output.Channels() {
+			if prev, taken := seen[ch]; taken {
+				t.Errorf("output %d is used by both %s and %s", ch, prev, b.Name)
+			}
+			seen[ch] = b.Name
+		}
+	}
+	for ch := 1; ch <= 10; ch++ {
+		if _, used := seen[ch]; !used {
+			t.Errorf("output %d is not used by any bus", ch)
 		}
 	}
 }

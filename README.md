@@ -251,7 +251,8 @@ $ cli studio
 
   STUDIO  rehearsal   ● REAPER 7.80/macOS-arm64
 
-   1 CUE 1  2 CUE 2  3 CUE 3  4 CUE 4  5 FX  6 MONITOR
+   1 CONSOLE  2 INPUTS  3 CUE 1  4 CUE 2  5 CUE 3  6 CUE 4  7 CUE 5
+   8 CUE 6  9 CUE 7  CUE 8  FX  MONITOR
 
    ▸ Mic 1       +1 dB    ────────┆──┃──────────
      Guitar      +3 dB    ────────┆────┃────────
@@ -264,11 +265,16 @@ $ cli studio
 |---|---|
 | Interface | Focusrite Scarlett 18i20 |
 | Monitors | Yamaha HS5 on outputs 1/2 |
-| Headphone amp | Mackie HM-800, four aux inputs on outputs 3/4, 5/6, 7/8, 9/10 |
+| Headphone amp | Mackie HM-800, eight inputs on outputs 3–10, one per channel |
 | Inputs | Mic 1, Mic 2, Guitar, Bass, Keyboard on 1–5; DTX drums on 7 |
 
-Keyboard and DTX are mono, as wired. The topology lives in
-`internal/studio/topology.go`; changing the rig is an edit there.
+Keyboard and DTX are mono, as wired. The HM-800's inputs are mono, so each
+cue is one output rather than a pair — eight cues out of the same ten
+channels four stereo cues would have used. Every instrument sends to every
+cue, which is the point: eight musicians, eight independent mixes.
+
+The topology lives in `internal/studio/topology.go`; a different rig is a
+config file, below.
 
 ## Setup
 
@@ -307,12 +313,16 @@ studio:
     - {id: keys,   name: Keys,    channel: 5, mode: stereo}
   outputs:
     main: [1, 2]
-    cues: [[3, 4], [5, 6]]
+    cues: [[3], [4], [5, 6]]
 ```
 
 `id` is what commands use (`cli studio cue 1 keys +3`), `channel` counts from
 1, and `mode` defaults to mono — a stereo input claims the next channel too.
-Cue mixes are numbered in the order listed.
+Cue mixes are numbered in the order listed. A cue is one channel for a mono
+headphone amp input, or two for a stereo one; MAIN is always a pair.
+
+A config file wins over the defaults, so a rig written before a default
+changed keeps the outputs it was given until that block is edited.
 
 A rig is checked before it is used: two inputs on one channel, or two buses on
 one output, is refused rather than discovered through the speakers. A session
@@ -348,6 +358,7 @@ label, which is what makes a desk fast once your hands know it.
 | `+` `-` | adjust (shift for four notches at once) |
 | `space` | toggle mute and solo |
 | `tab` | other pages: cue mixes, the pedalboards, monitoring |
+| `1`–`9` | jump straight to a page |
 | `s` | save |
 
 The aux rows *are* the cue sends, so `AUX1` on the console and

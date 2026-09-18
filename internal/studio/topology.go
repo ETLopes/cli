@@ -140,14 +140,34 @@ func InstrumentIDs() []string {
 	return out
 }
 
-// OutputPair is a stereo hardware output. Outputs are modelled as pairs even
-// though the interface exposes them as discrete channels, because every
-// destination in this rig is stereo.
+// OutputPair is where a bus leaves the interface. It is a pair for a stereo
+// destination and a single channel for a mono one, because not every
+// destination is stereo: a headphone amplifier with one input per channel
+// wants one output per musician, not two.
 type OutputPair struct {
-	Left, Right int
+	// Left is the channel, or the left of a stereo pair.
+	Left int
+	// Right is the right channel, or zero for a mono output.
+	Right int
 }
 
-func (o OutputPair) String() string { return fmt.Sprintf("%d/%d", o.Left, o.Right) }
+// Mono reports whether the output is a single channel.
+func (o OutputPair) Mono() bool { return o.Right == 0 }
+
+// Channels lists the hardware channels this output occupies.
+func (o OutputPair) Channels() []int {
+	if o.Mono() {
+		return []int{o.Left}
+	}
+	return []int{o.Left, o.Right}
+}
+
+func (o OutputPair) String() string {
+	if o.Mono() {
+		return fmt.Sprint(o.Left)
+	}
+	return fmt.Sprintf("%d/%d", o.Left, o.Right)
+}
 
 // Bus is a mix destination: the control-room monitors, or one headphone cue.
 type Bus struct {
@@ -169,14 +189,25 @@ func (b Bus) IsCue() bool { return b.CueID > 0 }
 // what a musician hears.
 func MainBus() Bus { return current.Main }
 
-// defaultCues are the headphone mixes, each feeding one aux input on the
-// headphone amp. Nothing assumes there are four.
-var defaultCues = []Bus{
-	{ID: "cue1", Name: "CUE 1", Output: OutputPair{3, 4}, CueID: 1},
-	{ID: "cue2", Name: "CUE 2", Output: OutputPair{5, 6}, CueID: 2},
-	{ID: "cue3", Name: "CUE 3", Output: OutputPair{7, 8}, CueID: 3},
-	{ID: "cue4", Name: "CUE 4", Output: OutputPair{9, 10}, CueID: 4},
-}
+// defaultCues are the headphone mixes, one per input on the headphone
+// amplifier. Each is mono and occupies a single output, because that amplifier
+// takes one input per headphone channel: eight outputs means eight musicians
+// with genuinely independent mixes, where pairing them would serve four.
+//
+// Nothing assumes there are eight, or that a cue is mono. A rig with stereo
+// cues describes them as pairs and the rest follows.
+var defaultCues = func() []Bus {
+	var out []Bus
+	for i := 0; i < 8; i++ {
+		out = append(out, Bus{
+			ID:     fmt.Sprintf("cue%d", i+1),
+			Name:   fmt.Sprintf("CUE %d", i+1),
+			Output: OutputPair{Left: 3 + i},
+			CueID:  i + 1,
+		})
+	}
+	return out
+}()
 
 // CueBuses returns every cue bus, ordered by cue number.
 func CueBuses() []Bus { return append([]Bus(nil), current.Cues...) }
@@ -204,8 +235,10 @@ func (t Topology) Validate() error {
 	if len(t.Instruments) == 0 {
 		return fmt.Errorf("a studio needs at least one input")
 	}
+	// The monitors are stereo: a mono control room would be a mistake rather
+	// than a choice.
 	if t.Main.Output.Left < 1 || t.Main.Output.Right < 1 {
-		return fmt.Errorf("the main bus has an incomplete output pair")
+		return fmt.Errorf("the main bus needs a stereo output pair")
 	}
 
 	usedInputs := map[int]string{}
@@ -236,10 +269,13 @@ func (t Topology) Validate() error {
 			return fmt.Errorf("duplicate bus id %q", b.ID)
 		}
 		busIDs[b.ID] = true
-		if b.Output.Left < 1 || b.Output.Right < 1 {
+		if b.Output.Left < 1 {
+			return fmt.Errorf("bus %q has no output", b.ID)
+		}
+		if !b.Output.Mono() && b.Output.Right < 1 {
 			return fmt.Errorf("bus %q has an incomplete output pair", b.ID)
 		}
-		for _, ch := range []int{b.Output.Left, b.Output.Right} {
+		for _, ch := range b.Output.Channels() {
 			if prev, taken := usedOutputs[ch]; taken {
 				return fmt.Errorf("output %d is claimed by both %q and %q", ch, prev, b.ID)
 			}

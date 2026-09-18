@@ -113,18 +113,37 @@ local function find_hw_send(tr)
   return -1
 end
 
--- ensure_hw_out routes a track to a stereo hardware output pair. chan is the
--- zero-based index of the left channel.
-local function ensure_hw_out(tr, chan)
+-- MONO_FLAG marks a send channel as a single channel rather than a pair.
+local MONO_FLAG = 1024
+
+-- ensure_hw_out routes a track to a hardware output. chan is the zero-based
+-- channel, and mono sends a single channel rather than a pair.
+--
+-- A mono send takes channel one rather than summing, which is exact here:
+-- cue sends are pre-fader, so they are taken before the channel's pan and
+-- both sides carry the same signal.
+local function ensure_hw_out(tr, chan, mono)
   local idx = find_hw_send(tr)
   local created = false
   if idx < 0 then
     idx = reaper.CreateTrackSend(tr, nil)
     created = true
   end
+
+  local want_dst = chan
+  local want_src = 0
+  if mono then
+    want_dst = chan + MONO_FLAG
+    want_src = MONO_FLAG
+  end
+
   local repaired = false
-  if reaper.GetTrackSendInfo_Value(tr, 1, idx, "I_DSTCHAN") ~= chan then
-    reaper.SetTrackSendInfo_Value(tr, 1, idx, "I_DSTCHAN", chan)
+  if reaper.GetTrackSendInfo_Value(tr, 1, idx, "I_DSTCHAN") ~= want_dst then
+    reaper.SetTrackSendInfo_Value(tr, 1, idx, "I_DSTCHAN", want_dst)
+    repaired = not created
+  end
+  if reaper.GetTrackSendInfo_Value(tr, 1, idx, "I_SRCCHAN") ~= want_src then
+    reaper.SetTrackSendInfo_Value(tr, 1, idx, "I_SRCCHAN", want_src)
     repaired = not created
   end
   -- Buses feed the interface directly. Leaving the master send on as well
@@ -210,14 +229,16 @@ function ops.setup(args)
   local bus_tracks = {}
   for _, spec in ipairs(buses) do
     local f = split(spec, ":")
-    local role, name, chan = f[1], f[2], tonumber(f[3])
+    local role, name, chan, mono = f[1], f[2], tonumber(f[3]), f[4] == "1"
     local tr, created = ensure_track(role, name)
     bus_tracks[role] = tr
-    local hw_created, hw_repaired = ensure_hw_out(tr, chan)
+    local hw_created, hw_repaired = ensure_hw_out(tr, chan, mono)
+    local where = mono and ("output " .. (chan + 1))
+      or ("outputs " .. (chan + 1) .. "/" .. (chan + 2))
     if created then
-      record("created", "bus " .. name, "outputs " .. (chan + 1) .. "/" .. (chan + 2))
+      record("created", "bus " .. name, where)
     elseif hw_created or hw_repaired then
-      record("repaired", "bus " .. name, "outputs " .. (chan + 1) .. "/" .. (chan + 2))
+      record("repaired", "bus " .. name, where)
     else
       record("unchanged", "bus " .. name, "")
     end
@@ -699,7 +720,12 @@ function ops.verify(args)
 
       local hw = "-"
       if reaper.GetTrackNumSends(tr, 1) > 0 then
-        hw = tostring(math.floor(reaper.GetTrackSendInfo_Value(tr, 1, 0, "I_DSTCHAN")))
+        local dst = math.floor(reaper.GetTrackSendInfo_Value(tr, 1, 0, "I_DSTCHAN"))
+        if dst >= MONO_FLAG then
+          hw = tostring(dst - MONO_FLAG) .. "m"
+        else
+          hw = tostring(dst)
+        end
       end
 
       local sends = {}

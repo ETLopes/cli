@@ -123,7 +123,7 @@ func savePatch(entries []patchEntry) error {
 	cur := studio.Current()
 	cues := make([][]int, 0, len(cur.Cues))
 	for _, c := range cur.Cues {
-		cues = append(cues, []int{c.Output.Left, c.Output.Right})
+		cues = append(cues, c.Output.Channels())
 	}
 	v.Set(config.KeyMainOut, []int{cur.Main.Output.Left, cur.Main.Output.Right})
 	v.Set(config.KeyCueOuts, cues)

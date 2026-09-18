@@ -189,9 +189,10 @@ func (a *Adapter) Setup(ctx context.Context) (daw.SetupReport, error) {
 
 	var buses []string
 	for _, b := range studio.Buses() {
-		// The bridge works in zero-based hardware channels.
-		buses = append(buses,
-			fmt.Sprintf("%s:%s:%d", b.ID, b.Name, b.Output.Left-1))
+		// The bridge works in zero-based hardware channels, and needs to know
+		// whether a bus takes one channel or a pair.
+		buses = append(buses, fmt.Sprintf("%s:%s:%d:%s",
+			b.ID, b.Name, b.Output.Left-1, boolArg(b.Output.Mono())))
 	}
 
 	raw, err := a.call(ctx, "setup",

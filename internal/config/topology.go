@@ -59,7 +59,7 @@ func DefaultTopologyFile() TopologyFile {
 	}
 	f.Outputs.Main = []int{t.Main.Output.Left, t.Main.Output.Right}
 	for _, c := range t.Cues {
-		f.Outputs.Cues = append(f.Outputs.Cues, []int{c.Output.Left, c.Output.Right})
+		f.Outputs.Cues = append(f.Outputs.Cues, c.Output.Channels())
 	}
 	return f
 }
@@ -149,14 +149,25 @@ func (f TopologyFile) Topology() (studio.Topology, error) {
 	return t, nil
 }
 
-// outputPair reads a two-channel output, which is how every destination in a
-// studio like this is wired even though the interface exposes them singly.
+// outputPair reads where a bus leaves the interface: one channel for a mono
+// destination, two for a stereo one.
+//
+// Both forms are allowed because both are real. A headphone amplifier taking
+// one input per channel wants a single output per musician; monitors want a
+// pair.
 func outputPair(raw []int, where string) (studio.OutputPair, error) {
-	if len(raw) != 2 {
-		return studio.OutputPair{}, fmt.Errorf("%s must be a pair of channels, e.g. [3, 4]", where)
+	switch len(raw) {
+	case 1:
+		if raw[0] < 1 {
+			return studio.OutputPair{}, fmt.Errorf("%s channels count from 1", where)
+		}
+		return studio.OutputPair{Left: raw[0]}, nil
+	case 2:
+		if raw[0] < 1 || raw[1] < 1 {
+			return studio.OutputPair{}, fmt.Errorf("%s channels count from 1", where)
+		}
+		return studio.OutputPair{Left: raw[0], Right: raw[1]}, nil
 	}
-	if raw[0] < 1 || raw[1] < 1 {
-		return studio.OutputPair{}, fmt.Errorf("%s channels count from 1", where)
-	}
-	return studio.OutputPair{Left: raw[0], Right: raw[1]}, nil
+	return studio.OutputPair{}, fmt.Errorf(
+		"%s must be one channel for mono, e.g. [3], or two for stereo, e.g. [3, 4]", where)
 }
