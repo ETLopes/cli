@@ -161,9 +161,16 @@ const (
 
 // stripOrder is the top-to-bottom order of a strip. Aux sends are inserted
 // after comp by the console, since how many there are depends on the rig.
+//
+// There is no pan. Every channel here is a mono input and is sent to the
+// buses as mono, which is what puts it in the middle of the control room
+// instead of stacked into one speaker; a pan control on top of that could only
+// turn the channel down. Nothing is lost in the headphones either, because a
+// cue leaves on a single channel and has no sides to sit between. ControlPan
+// is kept so sessions written when the strip had one still load.
 var stripOrder = []StripControl{
 	ControlTrim, ControlHigh, ControlMid, ControlMidFreq, ControlLow,
-	ControlComp, ControlPan, ControlMute, ControlSolo, ControlFader,
+	ControlComp, ControlMute, ControlSolo, ControlFader,
 }
 
 // StripControls returns the controls in the order a desk lays them out.

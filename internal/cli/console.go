@@ -71,7 +71,9 @@ func wrap(text string, width int) []string {
 func consoleRows() []consoleRow {
 	var rows []consoleRow
 	for _, c := range studio.StripControls() {
-		if c == studio.ControlPan {
+		// The aux rows sit below the channel's own controls and above its
+		// switches, where a desk puts them.
+		if c == studio.ControlMute {
 			for _, bus := range studio.CueBuses() {
 				rows = append(rows, consoleRow{cue: bus.CueID})
 			}

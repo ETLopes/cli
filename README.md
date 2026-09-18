@@ -297,6 +297,24 @@ does: it reuses what exists, repairs routing that has drifted, and never
 touches tracks it does not manage. Managed objects are tagged, so renaming or
 reordering tracks in REAPER does not detach them.
 
+### What setup repairs
+
+Each of these is a fault that leaves the routing looking perfectly correct
+while the room sounds wrong, which is why they are checked rather than
+assumed:
+
+| | |
+|---|---|
+| Hardware output | A bus feeding the wrong channel, or none |
+| **Panners** | Any bus or channel knocked off centre. A monitor bus nudged off centre silences one speaker; a cue panned away from its channel goes quiet in somebody's headphones |
+| **Mono sends** | A mono input reaches channel one of its track and barely touches channel two, so a send taking the pair stacks every instrument into the left of the control room. Sends are declared mono so the channel lands in the middle |
+| Send mode | A cue send that drifted off pre-fader, so the control-room mix started changing what a musician hears |
+| **Stale tracks** | A track the rig no longer names. Left alone it is still armed on its input and still feeding every cue, so that signal arrives twice. Removed if empty, unwired and kept if it holds a recording |
+| **Dead outputs** | A bus wired to an output REAPER's audio device does not have. Everything reads correctly and the socket is silent, so this is reported as an error |
+
+Nothing here touches a value you chose: faders, cue levels, effects and the
+monitor level are left exactly as they are.
+
 Why a bridge script at all: REAPER's web interface can read and write state
 but cannot create tracks or assign hardware inputs, while ReaScript can do
 both but is unreachable from outside REAPER. The bridge closes the gap.
@@ -367,20 +385,21 @@ control in the same place on every strip. It is read by position rather than by
 label, which is what makes a desk fast once your hands know it.
 
 ```
-        MIC 1    MIC 2    GUITAR   BASS     KEYBOARD DTX
+        MIC 1    MIC 2    GUITAR   GUITAR 2 BASS     DRUMS
  TRIM   0        0        0        0        0        0
  HIGH   0        0        +3       0        0        0
  MID    0        0        -2       0        0        0
  FREQ   1.0k     1.0k     1.0k     1.0k     1.0k     1.0k
  LOW    0        0        +1       0        0        0
- COMP   0%       0%       35%      55%      0%       0%
+ COMP   0%       0%       35%      0%       55%      0%
  AUX1   0        0        +3       0        0        0
  AUX2   0        0        0        0        0        0
- PAN    C        C        L20      C        C        C
- MUTE   ·        ·        ·        ON       ·        ·
+ ...    (one aux row per cue mix)
+ AUX8   0        0        0        0        0        0
+ MUTE   ·        ·        ·        ·        ON       ·
  SOLO   ·        ·        ·        ·        ·        ·
  ─────────────────────────────────────────────────────
- FADER  0        0        -3       -1       0        0
+ FADER  0        0        -3       0        -1       0
 ```
 
 | Key | |
@@ -396,6 +415,13 @@ label, which is what makes a desk fast once your hands know it.
 The aux rows *are* the cue sends, so `AUX1` on the console and
 `cli studio cue 1 guitar +3` move the same thing. How many aux rows appear
 follows the rig: a desk has a fixed number of sends, and this does not.
+
+There is no pan row, and that is deliberate. Every channel is a mono input and
+is sent to the buses as mono, which is what puts it in the middle of the
+control room rather than stacked into one speaker; a pan on top of that could
+only turn the channel down. The headphone mixes lose nothing either, because a
+cue leaves on a single channel and has no sides to sit between. Pan a channel
+in REAPER's own mixer if you want it off centre for a particular session.
 
 Tone and dynamics drive the channel's own EQ and compressor rather than adding
 a second set, so the console and the pedalboard cannot fight over the same
