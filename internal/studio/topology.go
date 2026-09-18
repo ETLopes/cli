@@ -40,6 +40,18 @@ type Instrument struct {
 	Input int
 	// Mode is how many channels the instrument occupies.
 	Mode ChannelMode
+	// Kind is what sort of instrument this is, which decides its effect
+	// chain. Empty means infer it from the ID, so a rig described before
+	// kinds existed still loads.
+	Kind Kind
+}
+
+// EffectiveKind is the instrument's kind, inferred from its ID when unset.
+func (i Instrument) EffectiveKind() Kind {
+	if i.Kind.Valid() {
+		return i.Kind
+	}
+	return InferKind(i.ID)
 }
 
 // Channels lists the hardware input channels this instrument occupies.
@@ -66,12 +78,12 @@ type Topology struct {
 // Keyboard and DTX are deliberately mono: they are wired that way, and
 // declaring them stereo would silently pull in whatever is on the next input.
 var defaultInstruments = []Instrument{
-	{ID: "mic1", Name: "Mic 1", Input: 1, Mode: Mono},
-	{ID: "mic2", Name: "Mic 2", Input: 2, Mode: Mono},
-	{ID: "guitar", Name: "Guitar", Input: 3, Mode: Mono},
-	{ID: "bass", Name: "Bass", Input: 4, Mode: Mono},
-	{ID: "keyboard", Name: "Keyboard", Input: 5, Mode: Mono},
-	{ID: "dtx", Name: "DTX", Input: 7, Mode: Mono},
+	{ID: "mic1", Name: "Mic 1", Input: 1, Mode: Mono, Kind: KindVocal},
+	{ID: "mic2", Name: "Mic 2", Input: 2, Mode: Mono, Kind: KindVocal},
+	{ID: "guitar", Name: "Guitar", Input: 3, Mode: Mono, Kind: KindGuitar},
+	{ID: "bass", Name: "Bass", Input: 4, Mode: Mono, Kind: KindBass},
+	{ID: "keyboard", Name: "Keyboard", Input: 5, Mode: Mono, Kind: KindKeys},
+	{ID: "dtx", Name: "DTX", Input: 7, Mode: Mono, Kind: KindDrums},
 }
 
 // current is the topology in force. Package-level accessors read through it,
@@ -93,6 +105,12 @@ func DefaultTopology() Topology {
 // buses sharing an output, is the kind of mistake discovered through the
 // speakers.
 func Use(t Topology) error {
+	// Kinds are settled here rather than at every read, so anything asking
+	// what is on an input gets an answer instead of a blank to interpret.
+	t.Instruments = append([]Instrument(nil), t.Instruments...)
+	for i := range t.Instruments {
+		t.Instruments[i].Kind = t.Instruments[i].EffectiveKind()
+	}
 	if err := t.Validate(); err != nil {
 		return err
 	}
@@ -129,6 +147,17 @@ func normalizeID(s string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// InstrumentsOfKind lists the instruments of one kind, in topology order.
+func InstrumentsOfKind(k Kind) []Instrument {
+	var out []Instrument
+	for _, in := range current.Instruments {
+		if in.EffectiveKind() == k {
+			out = append(out, in)
+		}
+	}
+	return out
 }
 
 // InstrumentIDs lists every instrument ID, for help text and error messages.
@@ -253,6 +282,10 @@ func (t Topology) Validate() error {
 		ids[in.ID] = true
 		if in.Input < 1 {
 			return fmt.Errorf("instrument %q has no input channel", in.ID)
+		}
+		if in.Kind != "" && !in.Kind.Valid() {
+			return fmt.Errorf("instrument %q has unknown kind %q; use one of %s",
+				in.ID, in.Kind, strings.Join(KindNames(), ", "))
 		}
 		for _, ch := range in.Channels() {
 			if prev, taken := usedInputs[ch]; taken {

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,31 +15,118 @@ import (
 	"github.com/ETLopes/cli/internal/ui"
 )
 
-// The patch page is where an instrument is moved to a different input. It is
-// separate from the console because it changes the shape of the studio rather
-// than the sound of it: a wrong value here is a channel that records silence,
-// which is worth a deliberate save rather than taking effect as you scroll.
+// The patch page is where the rig is described: what is plugged into each
+// input, and which input it is on. It is separate from the console because it
+// changes the shape of the studio rather than the sound of it: a wrong value
+// here is a channel that records silence, which is worth a deliberate save
+// rather than taking effect as you scroll.
+//
+// Changing what an input holds changes its pedalboard too, since a chain
+// follows the kind of instrument. Three inputs set to guitar give three
+// guitarists three separate boards.
 
 // maxInput is the highest channel the interface offers.
 const maxInput = 20
 
-// patchEntry is one instrument's input assignment while it is being edited.
+// patchEntry is one input's assignment while it is being edited.
 type patchEntry struct {
 	ID      string
 	Name    string
+	Kind    studio.Kind
 	Channel int
 	Stereo  bool
+
+	// orig is what this input held when the page opened. Cycling through the
+	// kinds to look at them should not cost an instrument its identity, which
+	// is what its saved levels and effects are keyed by, so coming back to
+	// where it started restores exactly that.
+	origID   string
+	origName string
+	origKind studio.Kind
 }
 
 // patchEntries reads the current assignment into an editable form.
 func patchEntries() []patchEntry {
 	var out []patchEntry
 	for _, in := range studio.Instruments() {
+		k := in.EffectiveKind()
 		out = append(out, patchEntry{
-			ID: in.ID, Name: in.Name, Channel: in.Input, Stereo: in.Mode == studio.Stereo,
+			ID: in.ID, Name: in.Name, Kind: k,
+			Channel: in.Input, Stereo: in.Mode == studio.Stereo,
+			origID: in.ID, origName: in.Name, origKind: k,
 		})
 	}
 	return out
+}
+
+// kindLabel is how a kind reads on screen, in the interface language.
+func kindLabel(k studio.Kind) string { return i18n.T("kind." + string(k)) }
+
+// otherInstruments renders every entry but one, which is what naming a new
+// instrument needs: the IDs already taken, and how many of each kind there
+// are. Pass a negative index to include them all.
+func otherInstruments(entries []patchEntry, skip int) []studio.Instrument {
+	var out []studio.Instrument
+	for i, e := range entries {
+		if i == skip {
+			continue
+		}
+		out = append(out, studio.Instrument{
+			ID: e.ID, Name: e.Name, Kind: e.Kind, Input: e.Channel,
+		})
+	}
+	return out
+}
+
+// setPatchKind changes what is plugged into an input, renaming it to suit.
+func setPatchKind(entries []patchEntry, idx int, k studio.Kind) {
+	e := &entries[idx]
+	if k == e.Kind {
+		return
+	}
+	e.Kind = k
+	if k == e.origKind && e.origID != "" {
+		e.ID, e.Name = e.origID, e.origName
+		return
+	}
+	e.ID, e.Name = studio.NextInstrument(k, otherInstruments(entries, idx))
+}
+
+// addPatchEntry plugs something into the first free input. The kind is the
+// unopinionated one, because the interface cannot know what was just carried
+// through the door.
+func addPatchEntry(entries []patchEntry) ([]patchEntry, error) {
+	used := map[int]bool{}
+	for _, e := range entries {
+		for _, c := range e.channels() {
+			used[c] = true
+		}
+	}
+	channel := 0
+	for c := 1; c <= maxInput; c++ {
+		if !used[c] {
+			channel = c
+			break
+		}
+	}
+	if channel == 0 {
+		return entries, errors.New(i18n.Tf("patch.full", maxInput))
+	}
+	id, name := studio.NextInstrument(studio.KindLine, otherInstruments(entries, -1))
+	return append(entries, patchEntry{
+		ID: id, Name: name, Kind: studio.KindLine, Channel: channel,
+	}), nil
+}
+
+// removePatchEntry unplugs an input. A studio with nothing plugged into it is
+// not a studio, so the last one stays.
+func removePatchEntry(entries []patchEntry, idx int) ([]patchEntry, error) {
+	if len(entries) <= 1 {
+		return entries, errors.New(i18n.T("patch.last"))
+	}
+	// The capped slice forces a copy rather than writing over the entries the
+	// caller still holds.
+	return append(entries[:idx:idx], entries[idx+1:]...), nil
 }
 
 // channels lists the hardware channels an entry occupies.
@@ -82,7 +170,7 @@ func patchTopology(entries []patchEntry) studio.Topology {
 			mode = studio.Stereo
 		}
 		t.Instruments = append(t.Instruments, studio.Instrument{
-			ID: e.ID, Name: e.Name, Input: e.Channel, Mode: mode,
+			ID: e.ID, Name: e.Name, Input: e.Channel, Mode: mode, Kind: e.Kind,
 		})
 	}
 	return t
@@ -109,7 +197,9 @@ func savePatch(entries []patchEntry) error {
 
 	inputs := make([]map[string]any, 0, len(entries))
 	for _, e := range entries {
-		entry := map[string]any{"id": e.ID, "name": e.Name, "channel": e.Channel}
+		entry := map[string]any{
+			"id": e.ID, "name": e.Name, "channel": e.Channel, "kind": string(e.Kind),
+		}
 		if e.Stereo {
 			entry["mode"] = "stereo"
 		}
@@ -138,10 +228,13 @@ func savePatch(entries []patchEntry) error {
 func renderPatch(entries []patchEntry, cursor int, width int) string {
 	var b strings.Builder
 
-	nameWidth := 0
+	nameWidth, kindWidth := 0, 0
 	for _, e := range entries {
 		if n := len(e.Name); n > nameWidth {
 			nameWidth = n
+		}
+		if n := len(kindLabel(e.Kind)); n > kindWidth {
+			kindWidth = n
 		}
 	}
 
@@ -155,6 +248,16 @@ func renderPatch(entries []patchEntry, cursor int, width int) string {
 			name = ui.Muted.Render(name)
 		}
 		b.WriteString("  " + marker + name + "  ")
+
+		// What is plugged in, which is also what pedalboard the input gets.
+		// No angle brackets around it: those mark what the arrow keys move,
+		// and the arrows belong to the input channel.
+		kind := ui.Pad(kindLabel(e.Kind), kindWidth)
+		if i == cursor {
+			b.WriteString(ui.Accent.Bold(true).Render(kind) + "  ")
+		} else {
+			b.WriteString(ui.Heading.Render(kind) + "  ")
+		}
 
 		channel := fmt.Sprintf("%s %d", i18n.T("patch.input"), e.Channel)
 		if e.Stereo {

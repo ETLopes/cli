@@ -58,7 +58,12 @@ type ParamDefault struct {
 // reports exactly the decibel value asked for.
 func DBScalar(db float64) float64 { return math.Pow(10, db/20) }
 
-// chains maps an instrument ID to its processing chain, in signal order.
+// chains maps an instrument kind to its processing chain, in signal order.
+//
+// Keyed by kind rather than by instrument, so what an input gets follows what
+// is plugged into it. Three guitars on three inputs each get this chain, as
+// their own instances on their own tracks: separate pedalboards, not a shared
+// one.
 //
 // Order is the order of a real pedalboard, because that is what makes the
 // sound people expect: tuner first so it sees a clean signal, dynamics and
@@ -67,8 +72,8 @@ func DBScalar(db float64) float64 { return math.Pow(10, db/20) }
 //
 // Everything starts switched off. A chain this long would otherwise be a wall
 // of sound the moment an instrument was plugged in.
-var chains = map[string][]Effect{
-	"guitar": {
+var chains = map[Kind][]Effect{
+	KindGuitar: {
 		{ID: "tuner", Name: "Tuner", Label: "TUN", Plugin: "ReaTune", ShowsUI: true},
 		{ID: "wah", Name: "Wah", Label: "WAH", Plugin: "JS: Wah-Wah"},
 		{ID: "octavedown", Name: "Octave Down", Label: "OCT-", Plugin: "JS: Pitch an Octave Down"},
@@ -92,7 +97,7 @@ var chains = map[string][]Effect{
 		{ID: "pingpong", Name: "Ping-Pong Delay", Label: "PPD", Plugin: "JS: Delay w/Tempo Ping-Pong"},
 		{ID: "reverb", Name: "Reverb", Label: "REV", Plugin: "ReaVerbate"},
 	},
-	"bass": {
+	KindBass: {
 		{ID: "tuner", Name: "Tuner", Label: "TUN", Plugin: "ReaTune", ShowsUI: true},
 		{ID: "gate", Name: "Noise Gate", Label: "GATE", Plugin: "ReaGate"},
 		{ID: "octavedown", Name: "Octave Down", Label: "OCT-", Plugin: "JS: Pitch an Octave Down"},
@@ -110,10 +115,8 @@ var chains = map[string][]Effect{
 		{ID: "chorus", Name: "Chorus", Label: "CHO", Plugin: "JS: Chorus (Stereo)"},
 		{ID: "eq", Name: "EQ", Label: "EQ", Plugin: "ReaEQ"},
 	},
-	// Both microphones get the same chain, so either can take a lead vocal.
-	"mic1": vocalChain(),
-	"mic2": vocalChain(),
-	"keyboard": {
+	KindVocal: vocalChain(),
+	KindKeys: {
 		{ID: "compressor", Name: "Compressor", Label: "CMP", Plugin: "ReaComp",
 			Initial: []ParamDefault{{Name: "Threshold", Value: DBScalar(-18)}}},
 		{ID: "saturation", Name: "Saturation", Label: "SAT", Plugin: "JS: Saturation"},
@@ -123,15 +126,26 @@ var chains = map[string][]Effect{
 		{ID: "lofidelay", Name: "Lo-Fi Delay", Label: "LOFI", Plugin: "JS: Delay (Lo-Fi)"},
 		{ID: "reverb", Name: "Reverb", Label: "REV", Plugin: "ReaVerbate"},
 	},
-	"dtx": {
+	KindDrums: {
 		{ID: "gate", Name: "Noise Gate", Label: "GATE", Plugin: "ReaGate"},
 		{ID: "compressor", Name: "Drum Compressor", Label: "CMP", Plugin: "JS: Digital Drum Compressor"},
 		{ID: "eq", Name: "EQ", Label: "EQ", Plugin: "ReaEQ"},
 		{ID: "reverb", Name: "Room Reverb", Label: "REV", Plugin: "ReaVerbate"},
 	},
+	// Whatever else turned up: a horn, a DI'd acoustic, a percussion
+	// overhead. Enough to sit something in a mix without pretending to know
+	// what it is.
+	KindLine: {
+		{ID: "gate", Name: "Noise Gate", Label: "GATE", Plugin: "ReaGate"},
+		{ID: "compressor", Name: "Compressor", Label: "CMP", Plugin: "ReaComp",
+			Initial: []ParamDefault{{Name: "Threshold", Value: DBScalar(-18)}}},
+		{ID: "eq", Name: "EQ", Label: "EQ", Plugin: "ReaEQ"},
+		{ID: "delay", Name: "Delay", Label: "DLY", Plugin: "JS: Delay w/Tempo Length"},
+		{ID: "reverb", Name: "Reverb", Label: "REV", Plugin: "ReaVerbate"},
+	},
 }
 
-// vocalChain is shared by both microphones.
+// vocalChain is what every microphone gets, however many there are.
 //
 // Dynamics come before pitch correction: a corrector tracks a steady level far
 // better than one that lurches, so compressing first makes the tuning follow
@@ -167,16 +181,34 @@ const (
 		"heavily-quantised vocal effect"
 )
 
+// chainOf resolves whatever it is given to a chain: an instrument in the
+// current rig, or failing that a kind by name.
+//
+// The fallback is what lets help text describe a guitar's pedalboard on a rig
+// that has no guitar plugged in.
+func chainOf(instrumentID string) []Effect {
+	if in, ok := LookupInstrument(instrumentID); ok {
+		return chains[in.EffectiveKind()]
+	}
+	if k, err := ParseKind(instrumentID); err == nil {
+		return chains[k]
+	}
+	return nil
+}
+
 // Chain returns an instrument's effect chain in signal order.
 func Chain(instrumentID string) []Effect {
-	return append([]Effect(nil), chains[normalizeID(instrumentID)]...)
+	return append([]Effect(nil), chainOf(instrumentID)...)
 }
+
+// ChainFor returns the chain a kind carries.
+func ChainFor(k Kind) []Effect { return append([]Effect(nil), chains[k]...) }
 
 // LookupEffect finds an effect within an instrument's chain, by ID, display
 // name or alias.
 func LookupEffect(instrumentID, effectID string) (Effect, bool) {
 	want := normalizeID(effectID)
-	for _, e := range chains[normalizeID(instrumentID)] {
+	for _, e := range chainOf(instrumentID) {
 		if normalizeID(e.ID) == want || normalizeID(e.Name) == want {
 			return e, true
 		}
@@ -191,7 +223,7 @@ func LookupEffect(instrumentID, effectID string) (Effect, bool) {
 
 // EffectIDs lists the effects available on an instrument, for help and errors.
 func EffectIDs(instrumentID string) []string {
-	c := chains[normalizeID(instrumentID)]
+	c := chainOf(instrumentID)
 	out := make([]string, len(c))
 	for i, e := range c {
 		out[i] = e.ID
@@ -201,7 +233,7 @@ func EffectIDs(instrumentID string) []string {
 
 // HasChain reports whether an instrument has any processing at all.
 func HasChain(instrumentID string) bool {
-	return len(chains[normalizeID(instrumentID)]) > 0
+	return len(chainOf(instrumentID)) > 0
 }
 
 // InstrumentsWithChains lists the instruments that carry processing, in
@@ -218,7 +250,7 @@ func InstrumentsWithChains() []string {
 
 // DescribeChain renders a chain as a signal path, for help text.
 func DescribeChain(instrumentID string) string {
-	c := chains[normalizeID(instrumentID)]
+	c := chainOf(instrumentID)
 	if len(c) == 0 {
 		return "no processing"
 	}

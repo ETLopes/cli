@@ -180,6 +180,27 @@ local function ensure_input(tr, channel)
   return changed
 end
 
+-- retire_track takes a track out of the signal path without destroying it: no
+-- input, not armed, no sends in any direction. The role tag goes too, so it is
+-- an ordinary track from here on and setup will not consider it again.
+--
+-- Used for a track holding recordings, where deleting it would throw away a
+-- take. Unwiring is the part that matters: a track still armed on an input
+-- something else now uses would double that signal into every cue.
+local function retire_track(tr)
+  reaper.SetMediaTrackInfo_Value(tr, "I_RECARM", 0)
+  reaper.SetMediaTrackInfo_Value(tr, "I_RECINPUT", -1)
+  reaper.SetMediaTrackInfo_Value(tr, "B_MAINSEND", 0)
+  for i = reaper.GetTrackNumSends(tr, 0) - 1, 0, -1 do
+    reaper.RemoveTrackSend(tr, 0, i)
+  end
+  for i = reaper.GetTrackNumSends(tr, 1) - 1, 0, -1 do
+    reaper.RemoveTrackSend(tr, 1, i)
+  end
+  reaper.GetSetMediaTrackInfo_String(tr, TAG_ROLE, "", true)
+  reaper.GetSetMediaTrackInfo_String(tr, TAG_MANAGED, "", true)
+end
+
 -- Each managed plugin instance is renamed to a stable tag, because a chain
 -- can hold several instances of one plugin -- a vocal has a tuner, a pitch
 -- corrector and a hard-tuned corrector, all of which are ReaTune -- and
@@ -276,6 +297,31 @@ function ops.setup(args)
       record("repaired", "track " .. name, "input " .. input .. ", mono")
     else
       record("unchanged", "track " .. name, "")
+    end
+  end
+
+  -- Anything still tagged that the topology no longer names is left over from
+  -- an earlier rig: an input that used to hold a bass and now holds a second
+  -- guitar. Leaving it is not merely untidy -- it is still armed on that
+  -- input and still sending to every cue, so the signal arrives twice.
+  --
+  -- An empty one is removed. One holding recordings is unwired and kept,
+  -- because deleting someone's take is not this script's decision to make.
+  local live = {}
+  for _, spec in ipairs(instruments) do live[split(spec, ":")[1]] = true end
+  for _, spec in ipairs(buses) do live[split(spec, ":")[1]] = true end
+  for i = reaper.CountTracks(0) - 1, 0, -1 do
+    local tr = reaper.GetTrack(0, i)
+    local role = track_role(tr)
+    if role and role ~= "" and not live[role] then
+      local _, name = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+      if reaper.CountTrackMediaItems(tr) == 0 then
+        reaper.DeleteTrack(tr)
+        record("removed", "track " .. name, "no longer in the studio")
+      else
+        retire_track(tr)
+        record("retired", "track " .. name, "holds recordings; unwired but kept")
+      end
     end
   end
 

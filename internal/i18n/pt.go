@@ -123,8 +123,21 @@ var pt = map[string]string{
 	"patch.stereo":    "estéreo",
 	"patch.conflict":  "conflita com %s",
 	"patch.free":      "entradas livres",
-	"patch.keys":      "↑/↓ instrumento · ←/→ entrada · m mono/estéreo · s salvar · tab muda de página · q sair",
+	"patch.keys":      "↑/↓ entrada · ←/→ canal · t instrumento · a adicionar · d remover · m mono/estéreo · s salvar · q sair",
 	"patch.saved":     "salvo e aplicado no REAPER",
 	"patch.unsaved":   "não salvo — aperte s para aplicar",
 	"patch.conflicts": "resolva os conflitos antes de salvar",
+	"patch.nowis":     "agora é %s — os efeitos mudam junto",
+	"patch.added":     "adicionado na entrada %d",
+	"patch.removed":   "%s desconectado",
+	"patch.full":      "todas as %d entradas estão em uso",
+	"patch.last":      "o estúdio precisa de pelo menos uma entrada",
+
+	// O que está ligado em cada entrada, que define a cadeia de efeitos.
+	"kind.vocal":  "Voz",
+	"kind.guitar": "Guitarra",
+	"kind.bass":   "Baixo",
+	"kind.keys":   "Teclado",
+	"kind.drums":  "Bateria",
+	"kind.line":   "Linha",
 }

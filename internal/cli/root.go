@@ -54,6 +54,11 @@ func Execute() int {
 	lang, langErr := resolveLanguage()
 	i18n.Use(lang)
 
+	// The rig, for the same reason: the studio's per-instrument commands are
+	// generated from it, so a rig with a second guitar needs to be known
+	// before the tree exists or `cli studio guitar2` is not a command.
+	topoErr := resolveTopology()
+
 	root := newRootCmd(e)
 
 	// Signals cancel the context so external tools are killed and partial
@@ -70,6 +75,10 @@ func Execute() int {
 	// exists, so --help still works when the configured language is nonsense.
 	if langErr != nil {
 		ui.Println(ui.Failure(langErr.Error()))
+		return 1
+	}
+	if topoErr != nil {
+		ui.Println(ui.Failure(topoErr.Error()))
 		return 1
 	}
 
@@ -96,9 +105,7 @@ func Execute() int {
 func resolveLanguage() (i18n.Lang, error) {
 	lang := i18n.Detect()
 
-	probe := viper.New()
-	probe.SetConfigName(config.FileName)
-	probe.AddConfigPath(config.Dir())
+	probe := configProbe()
 	// A file that cannot be read is reported properly by the ordinary load a
 	// moment later; failing twice over one problem helps nobody.
 	if err := probe.ReadInConfig(); err != nil {
@@ -115,6 +122,52 @@ func resolveLanguage() (i18n.Lang, error) {
 			config.KeyLang, langList(), configured)
 	}
 	return parsed, nil
+}
+
+// resolveTopology installs the rig before the command tree is built, for the
+// same reason the language is settled first: cobra captures its subcommands at
+// construction, and the studio generates one per instrument.
+//
+// A missing or unreadable file leaves the built-in rig in force and is
+// reported by the ordinary load a moment later.
+func resolveTopology() error {
+	probe := configProbe()
+	if err := probe.ReadInConfig(); err != nil {
+		return nil
+	}
+	t, err := config.LoadTopology(probe)
+	if err != nil {
+		return err
+	}
+	return studio.Use(t)
+}
+
+// configProbe reads the file the run will use, for the settings that have to
+// be known before the command tree exists. --config is taken straight from the
+// arguments because the flag parser has not run yet.
+func configProbe() *viper.Viper {
+	probe := viper.New()
+	if path := configFlagValue(os.Args[1:]); path != "" {
+		probe.SetConfigFile(path)
+		return probe
+	}
+	probe.SetConfigName(config.FileName)
+	probe.AddConfigPath(config.Dir())
+	return probe
+}
+
+// configFlagValue finds the --config argument, in either of the two spellings
+// cobra accepts for it.
+func configFlagValue(args []string) string {
+	for i, a := range args {
+		if a == "--config" && i+1 < len(args) {
+			return args[i+1]
+		}
+		if v, ok := strings.CutPrefix(a, "--config="); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 // langList names the supported languages, for an error message.

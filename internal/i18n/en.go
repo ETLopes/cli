@@ -131,8 +131,21 @@ var en = map[string]string{
 	"patch.stereo":    "stereo",
 	"patch.conflict":  "clashes with %s",
 	"patch.free":      "free inputs",
-	"patch.keys":      "↑/↓ instrument · ←/→ input · m mono/stereo · s save · tab page · q quit",
+	"patch.keys":      "↑/↓ input · ←/→ channel · t instrument · a add · d remove · m mono/stereo · s save · q quit",
 	"patch.saved":     "saved and applied to REAPER",
 	"patch.unsaved":   "unsaved — press s to apply",
 	"patch.conflicts": "fix the clashes before saving",
+	"patch.nowis":     "now %s — its effects change with it",
+	"patch.added":     "added on input %d",
+	"patch.removed":   "unplugged %s",
+	"patch.full":      "all %d inputs are in use",
+	"patch.last":      "the studio needs at least one input",
+
+	// What is plugged into an input, which decides its effect chain.
+	"kind.vocal":  "Vocal",
+	"kind.guitar": "Guitar",
+	"kind.bass":   "Bass",
+	"kind.keys":   "Keys",
+	"kind.drums":  "Drums",
+	"kind.line":   "Line",
 }

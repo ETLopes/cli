@@ -308,18 +308,26 @@ writes them out to edit:
 ```yaml
 studio:
   inputs:
-    - {id: mic1,   name: Mic 1,   channel: 1}
-    - {id: guitar, name: Guitar,  channel: 3}
-    - {id: keys,   name: Keys,    channel: 5, mode: stereo}
+    - {id: mic1,    name: Mic 1,    channel: 1, kind: vocal}
+    - {id: guitar,  name: Guitar,   channel: 3, kind: guitar}
+    - {id: guitar2, name: Guitar 2, channel: 4, kind: guitar}
+    - {id: keys,    name: Keys,     channel: 5, kind: keys, mode: stereo}
   outputs:
     main: [1, 2]
     cues: [[3], [4], [5, 6]]
 ```
 
-`id` is what commands use (`cli studio cue 1 keys +3`), `channel` counts from
-1, and `mode` defaults to mono — a stereo input claims the next channel too.
-Cue mixes are numbered in the order listed. A cue is one channel for a mono
-headphone amp input, or two for a stereo one; MAIN is always a pair.
+`id` is what commands use (`cli studio guitar2 overdrive on`), `channel` counts
+from 1, and `mode` defaults to mono — a stereo input claims the next channel
+too. Cue mixes are numbered in the order listed. A cue is one channel for a
+mono headphone amp input, or two for a stereo one; MAIN is always a pair.
+
+`kind` is what is plugged in — `vocal`, `guitar`, `bass`, `keys`, `drums` or
+`line` — and it decides the input's effect chain. Two inputs of the same kind
+get the same pedalboard as separate instances on separate tracks, so the two
+guitars above each have their own amp, drive and delay. Omit it and it is
+inferred from the ID, which is why a file written before kinds existed keeps
+working untouched.
 
 A config file wins over the defaults, so a rig written before a default
 changed keeps the outputs it was given until that block is edited.
@@ -327,6 +335,29 @@ changed keeps the outputs it was given until that block is edited.
 A rig is checked before it is used: two inputs on one channel, or two buses on
 one output, is refused rather than discovered through the speakers. A session
 written against a different rig still opens, reporting what it had to drop.
+
+## Changing what is plugged in
+
+The INPUTS page edits the rig from inside `cli studio`, without a text editor:
+
+| Key | |
+|---|---|
+| `↑` `↓` | choose an input |
+| `←` `→` | move it to another channel |
+| `t` | change what is plugged in, which changes its pedalboard |
+| `a` `d` | add an input, unplug one |
+| `m` | mono or stereo |
+| `s` | save and apply to REAPER |
+
+Retyping an input renames it to suit — a bass on input 4 becomes Guitar 2
+beside the guitar already there — and the FX page follows, offering that input
+a guitar's board. Cycling through the kinds and back leaves the instrument
+exactly as it was, since its saved levels and effects are keyed by its ID.
+
+Saving reconciles REAPER. A track the rig no longer names is removed, because
+one left behind is still armed on its input and still feeding every cue, so
+that signal would arrive twice. A track holding a recording is unwired and
+kept instead: deleting a take is not a decision this makes for you.
 
 ## The console
 

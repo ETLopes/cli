@@ -240,6 +240,10 @@ func (m *studioModel) rebuild() {
 	tabs = append(tabs, mon)
 
 	m.tabs = tabs
+	// Rebuilt rather than added to: after the rig changes, a row left over
+	// from an instrument that is no longer plugged in would still be pushed
+	// by a reply that arrived late.
+	m.rows = map[string]row{}
 	for _, t := range tabs {
 		for _, r := range t.rows {
 			m.rows[r.label] = r
@@ -734,12 +738,47 @@ func (m studioModel) handlePatchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.patchDirty = true
 		}
 		return m, nil
-	case "m", " ":
+	case "m":
 		e.Stereo = !e.Stereo
 		if e.Stereo && e.Channel >= maxInput {
 			e.Channel = maxInput - 1
 		}
 		m.patchDirty = true
+		return m, nil
+	case "t", " ":
+		setPatchKind(m.patch, m.patchRow, e.Kind.Next())
+		m.patchDirty = true
+		m.status, m.statusErr = i18n.Tf("patch.nowis", m.patch[m.patchRow].Name), false
+		return m, nil
+	case "T":
+		setPatchKind(m.patch, m.patchRow, e.Kind.Prev())
+		m.patchDirty = true
+		m.status, m.statusErr = i18n.Tf("patch.nowis", m.patch[m.patchRow].Name), false
+		return m, nil
+	case "a":
+		next, err := addPatchEntry(m.patch)
+		if err != nil {
+			m.status, m.statusErr = firstLine(err.Error()), true
+			return m, nil
+		}
+		m.patch = next
+		m.patchRow = len(m.patch) - 1
+		m.patchDirty = true
+		m.status, m.statusErr = i18n.Tf("patch.added", m.patch[m.patchRow].Channel), false
+		return m, nil
+	case "d", "delete", "backspace":
+		next, err := removePatchEntry(m.patch, m.patchRow)
+		if err != nil {
+			m.status, m.statusErr = firstLine(err.Error()), true
+			return m, nil
+		}
+		gone := m.patch[m.patchRow].Name
+		m.patch = next
+		if m.patchRow >= len(m.patch) {
+			m.patchRow = len(m.patch) - 1
+		}
+		m.patchDirty = true
+		m.status, m.statusErr = i18n.Tf("patch.removed", gone), false
 		return m, nil
 	case "tab":
 		m.tabIdx = (m.tabIdx + 1) % len(m.tabs)
@@ -762,9 +801,13 @@ func (m studioModel) handlePatchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.patchDirty = false
 		m.status, m.statusErr = i18n.T("patch.saved"), false
-		// The console follows the rig, so it is rebuilt around the new one.
+		// The console and the pedalboards follow the rig, so both are rebuilt
+		// around the new one. The FX page starts from the first instrument
+		// because the one it was showing may no longer be plugged in.
 		m.conRows = consoleRows()
 		m.conChan, m.conRow = 0, 0
+		m.fxInstrument = 0
+		m.patch = patchEntries()
 		m.rebuild()
 		return m, m.applyTopology()
 	}

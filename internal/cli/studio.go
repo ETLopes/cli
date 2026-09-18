@@ -204,6 +204,10 @@ func runStudioSetup(ctx context.Context, st *studioEnv) error {
 			ui.Println(ui.Success(a.Object) + ui.Muted.Render("  "+a.Detail))
 		case "repaired":
 			ui.Println(ui.Warning(a.Object) + ui.Muted.Render("  "+a.Detail))
+		case "removed", "retired":
+			// A track leaving the studio is worth saying out loud rather than
+			// listing quietly beside the ones that did not change.
+			ui.Println(ui.Warning(a.Object) + ui.Muted.Render("  "+a.Detail))
 		default:
 			ui.Println(ui.Muted.Render("  " + ui.GlyphPending + " " + a.Object))
 		}
@@ -213,8 +217,16 @@ func runStudioSetup(ctx context.Context, st *studioEnv) error {
 	if !report.Changed() {
 		ui.Println(ui.Success(i18n.T("setup.unchanged")))
 	} else {
-		ui.Println(ui.Success(fmt.Sprintf("%d created, %d repaired, %d unchanged",
-			counts["created"], counts["repaired"], counts["unchanged"])))
+		summary := fmt.Sprintf("%d created, %d repaired, %d unchanged",
+			counts["created"], counts["repaired"], counts["unchanged"])
+		// Only mentioned when it happened, since most runs remove nothing.
+		if n := counts["removed"]; n > 0 {
+			summary += fmt.Sprintf(", %d removed", n)
+		}
+		if n := counts["retired"]; n > 0 {
+			summary += fmt.Sprintf(", %d retired", n)
+		}
+		ui.Println(ui.Success(summary))
 	}
 	return st.store.Save(st.session)
 }
@@ -541,7 +553,18 @@ func newStudioMicCmd(e *env) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := "mic" + strings.TrimSpace(args[0])
 			if _, ok := studio.LookupInstrument(id); !ok {
-				return fmt.Errorf("there is no microphone %q; the studio has mic 1 and mic 2", args[0])
+				// Which microphones exist depends on the rig, so the error
+				// names the ones actually plugged in rather than the two this
+				// was first written against.
+				var have []string
+				for _, in := range studio.InstrumentsOfKind(studio.KindVocal) {
+					have = append(have, in.ID)
+				}
+				if len(have) == 0 {
+					return fmt.Errorf("there is no microphone %q; this studio has no vocal input", args[0])
+				}
+				return fmt.Errorf("there is no microphone %q; the studio has %s",
+					args[0], strings.Join(have, ", "))
 			}
 			return toggleEffect(cmd.Context(), e, id, args[1], args[2])
 		},

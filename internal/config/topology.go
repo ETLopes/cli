@@ -27,6 +27,10 @@ type Input struct {
 	// Mode is "mono" or "stereo". Empty means mono, since declaring stereo by
 	// accident silently claims the next input as well.
 	Mode string `mapstructure:"mode" yaml:"mode,omitempty"`
+	// Kind is what is plugged in — vocal, guitar, bass, keys, drums, line —
+	// which decides the effect chain the input gets. Empty is inferred from
+	// the ID, so a file written before kinds existed still loads.
+	Kind string `mapstructure:"kind" yaml:"kind,omitempty"`
 }
 
 // Outputs describes where each bus goes.
@@ -55,6 +59,7 @@ func DefaultTopologyFile() TopologyFile {
 		}
 		f.Inputs = append(f.Inputs, Input{
 			ID: in.ID, Name: in.Name, Channel: in.Input, Mode: mode,
+			Kind: string(in.EffectiveKind()),
 		})
 	}
 	f.Outputs.Main = []int{t.Main.Output.Left, t.Main.Output.Right}
@@ -114,8 +119,19 @@ func (f TopologyFile) Topology() (studio.Topology, error) {
 		if name == "" {
 			name = in.ID
 		}
+		// An unset kind is inferred rather than refused: the rig this was
+		// built against predates kinds, and its inputs already say what they
+		// are. A kind that is set but unknown is a typo worth reporting.
+		kind := studio.InferKind(in.ID)
+		if s := strings.TrimSpace(in.Kind); s != "" {
+			k, err := studio.ParseKind(s)
+			if err != nil {
+				return t, fmt.Errorf("studio.inputs[%d] (%s): %w", i, in.ID, err)
+			}
+			kind = k
+		}
 		t.Instruments = append(t.Instruments, studio.Instrument{
-			ID: in.ID, Name: name, Input: in.Channel, Mode: mode,
+			ID: in.ID, Name: name, Input: in.Channel, Mode: mode, Kind: kind,
 		})
 	}
 	if len(t.Instruments) == 0 {
