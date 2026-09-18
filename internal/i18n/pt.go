@@ -117,6 +117,14 @@ var pt = map[string]string{
 	"set.unsaved":       "alterações não salvas",
 	"set.title":         "configurações",
 
+	"cmd.levels.short": "Mostra o que cada entrada está recebendo",
+	"levels.title":     "NÍVEIS",
+	"levels.keys":      "q sair · os ganhos ficam na interface",
+	"meter.silent":     "nada chegando",
+	"meter.low":        "baixo — aumente o ganho",
+	"meter.good":       "bom",
+	"meter.hot":        "alto — diminua o ganho",
+
 	"cmd.phones.short": "Ajusta o nível de um instrumento em uma saída de fone da interface",
 	"phones.title":     "FONE %d",
 	"phones.feeds":     "saídas %s · também %s",

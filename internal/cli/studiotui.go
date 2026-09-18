@@ -123,6 +123,12 @@ type studioModel struct {
 	pushing map[string]bool
 	dirty   map[string]bool
 	rows    map[string]row
+
+	// meters are the live input levels, refreshed while the console is
+	// showing. Gain is set by watching one of these and turning something, so
+	// they are worth the extra bridge traffic only while they are on screen.
+	meters  map[string]daw.Meter
+	metered bool
 }
 
 func newStudioModel(ctx context.Context, s *studioEnv) studioModel {
@@ -131,6 +137,7 @@ func newStudioModel(ctx context.Context, s *studioEnv) studioModel {
 		pushing: map[string]bool{},
 		dirty:   map[string]bool{},
 		rows:    map[string]row{},
+		meters:  map[string]daw.Meter{},
 	}
 	m.conRows = consoleRows()
 	m.patch = patchEntries()
@@ -334,6 +341,41 @@ func effectNote(e studio.Effect) string {
 // fxInstruments lists the instruments the FX page can show.
 func fxInstruments() []string { return studio.InstrumentsWithChains() }
 
+// meterInterval is how often the levels refresh. Fast enough to follow a knob
+// being turned, slow enough that it does not crowd out the control messages it
+// shares a serialised bridge with.
+const meterInterval = 300 * time.Millisecond
+
+type metersMsg struct {
+	meters map[string]daw.Meter
+	err    error
+}
+
+// readMeters fetches the levels, unless a control change is already in flight.
+// A meter is a readout and can wait; a fader that lags the key cannot.
+func (m studioModel) readMeters() tea.Cmd {
+	for _, busy := range m.pushing {
+		if busy {
+			return m.scheduleMeters()
+		}
+	}
+	st, ctx := m.studio, m.ctx
+	ids := studio.InstrumentIDs()
+	return func() tea.Msg {
+		c, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		got, err := st.dawc.Meters(c, ids)
+		return metersMsg{meters: got, err: err}
+	}
+}
+
+// scheduleMeters asks for the next refresh.
+func (m studioModel) scheduleMeters() tea.Cmd {
+	return tea.Tick(meterInterval, func(time.Time) tea.Msg { return meterTickMsg{} })
+}
+
+type meterTickMsg struct{}
+
 type connectedMsg struct {
 	info daw.Info
 	err  error
@@ -482,7 +524,28 @@ func (m studioModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dawName = strings.TrimSpace(msg.info.Name + " " + msg.info.Version)
 		m.status = "connected"
 		m.statusErr = false
+		// Meters only start once there is something to read them from, and
+		// only one loop ever runs.
+		if !m.metered {
+			m.metered = true
+			return m, m.readMeters()
+		}
 		return m, nil
+
+	case meterTickMsg:
+		if !m.connected {
+			m.metered = false
+			return m, nil
+		}
+		return m, m.readMeters()
+
+	case metersMsg:
+		// A failed read is not worth a status line: it is usually REAPER busy
+		// for a moment, and the levels simply hold until the next one.
+		if msg.err == nil {
+			m.meters = msg.meters
+		}
+		return m, m.scheduleMeters()
 
 	case syncedMsg:
 		m.pushing[msg.label] = false
@@ -940,7 +1003,7 @@ func (m studioModel) View() tea.View {
 	}
 
 	if m.onConsole() {
-		b.WriteString(renderConsole(m.studio.session, m.conRows, m.conChan, m.conRow, m.width))
+		b.WriteString(renderConsole(m.studio.session, m.conRows, m.conChan, m.conRow, m.width, m.meters))
 
 		// What the selected control does, always in view. A desk assumes you
 		// already know; there is no reason this should.

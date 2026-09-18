@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/ETLopes/cli/internal/daw"
 	"github.com/ETLopes/cli/internal/studio"
 )
 
@@ -293,12 +294,20 @@ func TestConsoleSwitches(t *testing.T) {
 func TestConsoleRenderFitsTheTerminal(t *testing.T) {
 	s := studio.NewSession("t")
 	rows := consoleRows()
-	for _, width := range []int{40, 80, 200} {
-		out := renderConsole(s, rows, 0, 0, width)
-		for _, line := range strings.Split(out, "\n") {
-			if lipgloss.Width(line) > width {
-				t.Errorf("at width %d a line is %d wide:\n%s", width, lipgloss.Width(line), line)
-				break
+	// With meters and without: the meter rows are the widest thing the desk
+	// draws, so they are the ones that would spill off the edge.
+	live := map[string]daw.Meter{}
+	for _, in := range studio.Instruments() {
+		live[in.ID] = daw.Meter{Peak: -12, L: -12, R: -12}
+	}
+	for _, meters := range []map[string]daw.Meter{nil, live} {
+		for _, width := range []int{40, 80, 200} {
+			out := renderConsole(s, rows, 0, 0, width, meters)
+			for _, line := range strings.Split(out, "\n") {
+				if lipgloss.Width(line) > width {
+					t.Errorf("at width %d a line is %d wide:\n%s", width, lipgloss.Width(line), line)
+					break
+				}
 			}
 		}
 	}

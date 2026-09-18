@@ -124,6 +124,14 @@ var en = map[string]string{
 	"set.unsaved":       "unsaved changes",
 	"set.title":         "settings",
 
+	"cmd.levels.short": "Show what each input is receiving",
+	"levels.title":     "LEVELS",
+	"levels.keys":      "q quit · gain knobs are on the interface",
+	"meter.silent":     "nothing arriving",
+	"meter.low":        "low — raise the preamp",
+	"meter.good":       "good",
+	"meter.hot":        "hot — lower the preamp",
+
 	"cmd.phones.short": "Set an instrument's level in a headphone jack on the interface",
 
 	"phones.title":  "PHONES %d",

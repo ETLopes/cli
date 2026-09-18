@@ -250,7 +250,8 @@ func abs(n int) int {
 }
 
 // renderConsole draws the desk.
-func renderConsole(s *studio.Session, rows []consoleRow, chanIdx, rowIdx int, width int) string {
+func renderConsole(s *studio.Session, rows []consoleRow, chanIdx, rowIdx int, width int,
+	meters map[string]daw.Meter) string {
 	instruments := studio.Instruments()
 	if len(instruments) == 0 {
 		return "  " + i18n.T("console.no_inputs") + "\n"
@@ -291,6 +292,25 @@ func renderConsole(s *studio.Session, rows []consoleRow, chanIdx, rowIdx int, wi
 		}
 	}
 	b.WriteString("\n")
+
+	// The meters sit directly above the strip, so the level and the TRIM that
+	// sets it are read in one glance. They are a readout, not a row the
+	// cursor can land on: there is nothing here to adjust.
+	if len(meters) > 0 {
+		// One column short of the cell, so neighbouring bars never touch.
+		bar := max(3, colWidth-1)
+		b.WriteString("  " + ui.Muted.Render(ui.Pad("METER", labelWidth)))
+		for i := first; i < last; i++ {
+			m := meters[instruments[i].ID]
+			b.WriteString(meterBar(m, bar) + strings.Repeat(" ", colWidth-bar))
+		}
+		b.WriteString("\n")
+		b.WriteString("  " + strings.Repeat(" ", labelWidth))
+		for i := first; i < last; i++ {
+			b.WriteString(ui.Muted.Render(ui.Pad(meterLabel(meters[instruments[i].ID]), colWidth)))
+		}
+		b.WriteString("\n")
+	}
 
 	for ri, r := range rows {
 		// The fader is the one control a desk sets apart, so it gets a rule.

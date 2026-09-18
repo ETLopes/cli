@@ -416,6 +416,26 @@ The aux rows *are* the cue sends, so `AUX1` on the console and
 `cli studio cue 1 guitar +3` move the same thing. How many aux rows appear
 follows the rig: a desk has a fixed number of sends, and this does not.
 
+The `METER` row above the strip is live input level, refreshed while the
+console is showing, with `TRIM` directly beneath it. That pairing is the point:
+gain is set by watching a level and turning something.
+
+```sh
+cli studio levels          # a meter bridge, until you press q
+cli studio levels --once   # one reading, for a log
+```
+
+Aim for an instrument peaking near **−12 dB** while it is played at
+performance volume — headroom for the loudest hit without burying the channel.
+The bar gives most of its width to the range where that decision is made, so
+the fifteen decibels below clipping are readable rather than crowded into the
+last two columns. Amber is too quiet, green is right, red is close to clipping,
+and dots mean nothing is arriving.
+
+The gain itself is on the interface. `TRIM` is digital gain applied after the
+converter, useful for a nudge; the preamp knobs are analogue and out of reach
+from here, and they are the ones worth setting properly.
+
 There is no pan row, and that is deliberate. Every channel is a mono input and
 is sent to the buses as mono, which is what puts it in the middle of the
 control room rather than stacked into one speaker; a pan on top of that could

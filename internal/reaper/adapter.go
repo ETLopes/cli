@@ -347,6 +347,37 @@ func (a *Adapter) SetMonitorMute(ctx context.Context, muted bool) error {
 	return err
 }
 
+// Meters reads the current level on each named track.
+//
+// Short timeout and no retry: a meter that arrives late is worse than one that
+// is missing, because it shows a level the signal has already left behind.
+func (a *Adapter) Meters(ctx context.Context, ids []string) (map[string]daw.Meter, error) {
+	if len(ids) == 0 {
+		return map[string]daw.Meter{}, nil
+	}
+	raw, err := a.callWithTimeout(ctx, 3*time.Second, "peaks", strings.Join(ids, ","))
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]daw.Meter, len(ids))
+	for _, entry := range strings.Split(raw, fieldSep) {
+		f := strings.Split(entry, "|")
+		if len(f) != 4 {
+			continue
+		}
+		var m daw.Meter
+		peak, err1 := strconv.ParseFloat(f[1], 64)
+		left, err2 := strconv.ParseFloat(f[2], 64)
+		right, err3 := strconv.ParseFloat(f[3], 64)
+		if err1 != nil || err2 != nil || err3 != nil {
+			continue
+		}
+		m.Peak, m.L, m.R = peak, left, right
+		out[f[0]] = m
+	}
+	return out, nil
+}
+
 // Save writes REAPER's project to disk.
 func (a *Adapter) Save(ctx context.Context) error {
 	_, err := a.call(ctx, "save")

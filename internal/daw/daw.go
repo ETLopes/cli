@@ -65,6 +65,24 @@ func (r SetupReport) Counts() map[string]int {
 	return out
 }
 
+// Meter is the signal level on one track, in decibels full scale.
+//
+// Both channels are reported as well as the louder of the two, because the
+// failure worth seeing is often an imbalance, and that is invisible in a
+// single number.
+type Meter struct {
+	Peak float64
+	L    float64
+	R    float64
+}
+
+// Silence is the level reported for a track carrying nothing. It is far below
+// anything audible, so a meter can render it as empty rather than as a bar.
+const Silence = -150
+
+// Silent reports whether the meter is showing nothing at all.
+func (m Meter) Silent() bool { return m.Peak <= Silence }
+
 // DAW is the control surface the application drives.
 //
 // Every method takes a context: these are network calls to another process
@@ -78,6 +96,12 @@ type DAW interface {
 	// creating what is missing and repairing what is wrong. It must be safe
 	// to call repeatedly and must not disturb tracks it does not manage.
 	Setup(ctx context.Context) (SetupReport, error)
+
+	// Meters reads the current signal level on each named track. It is the
+	// only way to set input gain deliberately: a channel that is twenty
+	// decibels down sounds like a quiet player rather than a mis-set preamp,
+	// and no amount of looking at the routing shows which it is.
+	Meters(ctx context.Context, ids []string) (map[string]Meter, error)
 
 	// Snapshot reads the workstation's current state back into the domain
 	// model, so desired and actual state can be compared.
