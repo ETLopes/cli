@@ -24,6 +24,11 @@ local TAG_MANAGED = "P_EXT:clistudio.managed"
 -- carry the processed tone (the guitar's amp sim) while staying independent of
 -- the main fader, so moving the control-room mix never alters what a musician
 -- hears in their headphones.
+-- MONO_FLAG marks a send channel as a single channel rather than a pair. It
+-- lives up here because both the hardware sends and the bus sends need it, and
+-- a local declared below its first use would be read as a nil global.
+local MONO_FLAG = 1024
+
 local SENDMODE_POST_FADER = 0
 local SENDMODE_PRE_FX = 1
 local SENDMODE_PRE_FADER = 3
@@ -91,8 +96,17 @@ local function find_send(src, dest)
   return -1
 end
 
--- ensure_send creates a send from src to dest if missing and forces its mode.
-local function ensure_send(src, dest, mode)
+-- ensure_send creates a send from src to dest if missing and forces its mode
+-- and source width.
+--
+-- An instrument on a mono input is a mono source, and saying so matters. A
+-- mono hardware input lands on channel one of its track and barely touches
+-- channel two, so a send that takes the pair carries a signal that is entirely
+-- on one side: every instrument stacks into the left of the control room,
+-- twenty decibels up, loud enough to distort, while the right sits nearly
+-- empty. Declaring the source mono makes REAPER place it across both channels
+-- of the destination instead, which is what centred is supposed to mean.
+local function ensure_send(src, dest, mode, mono)
   local idx = find_send(src, dest)
   local created = false
   if idx < 0 then
@@ -104,6 +118,11 @@ local function ensure_send(src, dest, mode)
     reaper.SetTrackSendInfo_Value(src, 0, idx, "I_SENDMODE", mode)
     repaired = not created
   end
+  local want_src = mono and MONO_FLAG or 0
+  if reaper.GetTrackSendInfo_Value(src, 0, idx, "I_SRCCHAN") ~= want_src then
+    reaper.SetTrackSendInfo_Value(src, 0, idx, "I_SRCCHAN", want_src)
+    repaired = not created
+  end
   return idx, created, repaired
 end
 
@@ -112,9 +131,6 @@ local function find_hw_send(tr)
   if reaper.GetTrackNumSends(tr, 1) > 0 then return 0 end
   return -1
 end
-
--- MONO_FLAG marks a send channel as a single channel rather than a pair.
-local MONO_FLAG = 1024
 
 -- ensure_hw_out routes a track to a hardware output. chan is the zero-based
 -- channel, and mono sends a single channel rather than a pair.
@@ -155,17 +171,33 @@ local function ensure_hw_out(tr, chan, mono)
   return created, repaired
 end
 
--- ensure_centred puts a bus back in the middle.
+-- pan_send returns the index of the send into the control room, which is where
+-- a mono channel's pan belongs.
 --
--- A bus is a destination, not a performance. The control room is stereo and
--- each cue leaves on a single channel, so panning either of them only throws
--- signal away: a monitor bus nudged off centre silences one speaker, and a cue
--- panned away from channel one goes quiet in somebody's headphones. Both sound
--- like a broken cable rather than a stray control, which is exactly why setup
--- should put it back rather than leave it to be hunted down.
+-- The channel is mono: one input, one signal. Its track pan cannot place that
+-- anywhere, it can only turn it down, because the mono send is taken from
+-- channel one and panning away from channel one simply removes it. The pan
+-- that means something is the one on the send into the stereo bus, which is
+-- exactly where the pot sits on a desk built from mono channels.
+local function pan_send(tr)
+  local main = find_managed("main")
+  if not main then return -1 end
+  return find_send(tr, main)
+end
+
+-- ensure_centred puts a track's own panner back in the middle.
 --
--- Instrument tracks are left alone. Panning those is the point of a pan
--- control.
+-- Every managed track wants its own panner centred, for the same reason in two
+-- guises. A bus is a destination, not a performance: the control room is
+-- stereo and each cue leaves on a single channel, so a monitor bus nudged off
+-- centre silences one speaker and a cue panned off channel one goes quiet in
+-- somebody's headphones. An instrument is mono, and its sends say so, so its
+-- track pan cannot place it either -- dragging it only attenuates, and at the
+-- extreme mutes the channel outright.
+--
+-- All of those sound like a broken cable rather than a stray control, which is
+-- why setup puts them back. A channel's real pan lives on its send into the
+-- control room, and that is left exactly as the player set it.
 local function ensure_centred(tr)
   if reaper.GetMediaTrackInfo_Value(tr, "D_PAN") ~= 0 then
     reaper.SetMediaTrackInfo_Value(tr, "D_PAN", 0)
@@ -291,6 +323,7 @@ function ops.setup(args)
     local role, name, input = f[1], f[2], tonumber(f[3])
     local tr, created = ensure_track(role, name)
     local input_changed = ensure_input(tr, input)
+    if ensure_centred(tr) then input_changed = true end
 
     -- The instrument reaches the monitors through MAIN, not the master bus,
     -- so the control-room mix stays one explicit path.
@@ -301,13 +334,13 @@ function ops.setup(args)
 
     local touched = created or input_changed
     if bus_tracks["main"] then
-      local _, c, r = ensure_send(tr, bus_tracks["main"], SENDMODE_POST_FADER)
+      local _, c, r = ensure_send(tr, bus_tracks["main"], SENDMODE_POST_FADER, true)
       touched = touched or c or r
     end
     for _, spec2 in ipairs(buses) do
       local bf = split(spec2, ":")
       if bf[1] ~= "main" and bus_tracks[bf[1]] then
-        local _, c, r = ensure_send(tr, bus_tracks[bf[1]], SENDMODE_PRE_FADER)
+        local _, c, r = ensure_send(tr, bus_tracks[bf[1]], SENDMODE_PRE_FADER, true)
         touched = touched or c or r
       end
     end
@@ -702,7 +735,13 @@ function ops.setchannel(args)
   local soloed  = args[11] == "1"
 
   reaper.SetMediaTrackInfo_Value(tr, "D_VOL", db_to_scalar(fader))
-  reaper.SetMediaTrackInfo_Value(tr, "D_PAN", pan)
+  -- Pan goes on the send into the control room rather than the track; see
+  -- pan_send. The track's own panner stays centred, where it does no harm.
+  reaper.SetMediaTrackInfo_Value(tr, "D_PAN", 0)
+  local pidx = pan_send(tr)
+  if pidx >= 0 then
+    reaper.SetTrackSendInfo_Value(tr, 0, pidx, "D_PAN", pan)
+  end
   reaper.SetMediaTrackInfo_Value(tr, "B_MUTE", muted and 1 or 0)
   reaper.SetMediaTrackInfo_Value(tr, "I_SOLO", soloed and 1 or 0)
 

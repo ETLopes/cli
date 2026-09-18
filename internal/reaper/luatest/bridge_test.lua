@@ -204,10 +204,26 @@ check("the monitor bus is recentred", find_role("main").vals.D_PAN == 0, find_ro
 check("the cue bus is recentred", find_role("cue1").vals.D_PAN == 0, find_role("cue1").vals.D_PAN)
 check("recentring is reported", count_kind(acts, "repaired") == 2, table.concat(acts, " "))
 
--- An instrument's pan is a choice, not damage: leave it exactly alone.
-find_role("guitar").vals.D_PAN = -0.5
+-- An instrument is mono and its sends say so, so its track pan can only
+-- attenuate it. Setup centres that too, and the pan a player actually set
+-- lives on the send into the control room, untouched.
+local g = find_role("guitar")
+g.vals.D_PAN = -0.5
+g.sends[1].D_PAN = 0.75
 setup("guitar:Guitar:1")
-check("an instrument keeps its pan", find_role("guitar").vals.D_PAN == -0.5, find_role("guitar").vals.D_PAN)
+check("an instrument's track pan is centred", g.vals.D_PAN == 0, g.vals.D_PAN)
+check("the pan on the send is left alone", g.sends[1].D_PAN == 0.75, g.sends[1].D_PAN)
+
+-- A mono input reaches channel one and barely touches channel two, so a send
+-- taking the pair stacks every instrument into the left of the control room.
+-- Saying the source is mono is what centres it.
+check("sends are mono-sourced", g.sends[1].I_SRCCHAN == 1024, g.sends[1].I_SRCCHAN)
+for i, s in ipairs(g.sends) do
+  check("send " .. i .. " is mono-sourced", s.I_SRCCHAN == 1024, s.I_SRCCHAN)
+end
+
+-- A bus feeds the interface as it is; only the instruments are mono sources.
+check("a bus hardware send is untouched by that", find_role("main").hw[1] ~= nil, nil)
 
 print(fails == 0 and "\nALL LUA CHECKS PASSED" or ("\n" .. fails .. " LUA CHECKS FAILED"))
 os.exit(fails == 0 and 0 or 1)
