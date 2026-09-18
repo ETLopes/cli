@@ -266,6 +266,7 @@ $ cli studio
 | Interface | Focusrite Scarlett 18i20 |
 | Monitors | Yamaha HS5 on outputs 1/2 |
 | Headphone amp | Mackie HM-800, eight inputs on outputs 3–10, one per channel |
+| Headphone jacks | Two on the interface's front panel, wired to outputs 7/8 and 9/10 |
 | Inputs | Mic 1, Mic 2, Guitar, Bass, Keyboard on 1–5; DTX drums on 7 |
 
 Keyboard and DTX are mono, as wired. The HM-800's inputs are mono, so each
@@ -400,6 +401,28 @@ Tone and dynamics drive the channel's own EQ and compressor rather than adding
 a second set, so the console and the pedalboard cannot fight over the same
 signal. `TRIM` is digital input gain — the preamp knobs on the interface are
 analogue and out of reach from here.
+
+## The interface's headphone jacks
+
+The two jacks on the front of the interface are not extra outputs. Focusrite
+wires Headphones 1 to line outputs 7/8 and Headphones 2 to 9/10, so a jack
+carries whatever those outputs already hold — here, two of the mono cues, one
+per ear. Left unattended that means each ear hears a different musician's mix.
+
+```sh
+cli studio phones 1 guitar +3      louder in the first jack
+cli studio phones 2 bass @-6       exactly -6 dB in the second
+```
+
+Both cues behind a jack move together, so the wearer hears one coherent mix.
+The TUI has a page per jack, and a cue page that a jack also taps says so in
+its title. A different interface declares its own jacks:
+
+```yaml
+studio:
+  outputs:
+    phones: [[7, 8], [9, 10]]
+```
 
 ## Cue mixes
 

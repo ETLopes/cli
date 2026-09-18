@@ -39,6 +39,10 @@ type Outputs struct {
 	Main []int `mapstructure:"main" yaml:"main"`
 	// Cues are the headphone pairs, in order.
 	Cues [][]int `mapstructure:"cues" yaml:"cues"`
+	// Phones are the interface's headphone jacks, each the pair of line
+	// outputs it is wired to. Not an allocation: a jack carries whatever
+	// those outputs already hold, so these overlap the cues on purpose.
+	Phones [][]int `mapstructure:"phones" yaml:"phones,omitempty"`
 }
 
 // TopologyFile is the configurable shape of the studio.
@@ -65,6 +69,9 @@ func DefaultTopologyFile() TopologyFile {
 	f.Outputs.Main = []int{t.Main.Output.Left, t.Main.Output.Right}
 	for _, c := range t.Cues {
 		f.Outputs.Cues = append(f.Outputs.Cues, c.Output.Channels())
+	}
+	for _, ph := range t.Phones {
+		f.Outputs.Phones = append(f.Outputs.Phones, ph.Channels())
 	}
 	return f
 }
@@ -144,6 +151,20 @@ func (f TopologyFile) Topology() (studio.Topology, error) {
 			return t, err
 		}
 		t.Main = studio.Bus{ID: "main", Name: "MAIN", Output: pair}
+	}
+
+	// The jacks are a property of the interface, so an unconfigured rig keeps
+	// the built-in ones rather than losing them along with the cue layout.
+	t.Phones = def.Phones
+	if len(f.Outputs.Phones) > 0 {
+		t.Phones = nil
+		for i, raw := range f.Outputs.Phones {
+			pair, err := outputPair(raw, fmt.Sprintf("studio.outputs.phones[%d]", i))
+			if err != nil {
+				return t, err
+			}
+			t.Phones = append(t.Phones, pair)
+		}
 	}
 
 	if len(f.Outputs.Cues) == 0 {

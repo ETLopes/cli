@@ -159,7 +159,13 @@ func (m *studioModel) rebuild() {
 
 	for _, bus := range studio.CueBuses() {
 		cueID := bus.CueID
-		t := tab{title: bus.Name}
+		title := bus.Name
+		// A cue on an output a headphone jack taps is heard in two places at
+		// once, which is worth saying where it is edited.
+		if jack, ear, ok := studio.PhoneJackOf(bus); ok {
+			title = fmt.Sprintf("%s (%s %s)", bus.Name, i18n.Tf("phones.title", jack), ear)
+		}
+		t := tab{title: title}
 		for _, in := range studio.Instruments() {
 			inst := in
 			t.rows = append(t.rows, row{
@@ -186,6 +192,56 @@ func (m *studioModel) rebuild() {
 			})
 		}
 		tabs = append(tabs, t)
+	}
+
+	// A headphone jack on the interface carries the cues already on its line
+	// outputs -- one per ear. Its page moves them together, so the wearer
+	// hears one mix rather than two different ones.
+	for jack := 1; jack <= studio.PhoneCount(); jack++ {
+		cues, ok := studio.PhoneCues(jack)
+		if !ok || len(cues) == 0 {
+			continue
+		}
+		p := tab{title: i18n.Tf("phones.title", jack)}
+		for _, in := range studio.Instruments() {
+			inst, jackCues := in, cues
+			p.rows = append(p.rows, row{
+				label: i18n.Tf("phones.title", jack) + " " + inst.Name,
+				kind:  rowLevel,
+				value: func() string {
+					cue, err := session.Cue(jackCues[0].CueID)
+					if err != nil {
+						return "-"
+					}
+					return cue.Level(inst.ID).String() + " dB"
+				},
+				adjust: func(delta studio.Level) (studio.Change, error) {
+					var change studio.Change
+					var err error
+					for _, c := range jackCues {
+						change, err = session.SetCueLevel(c.CueID, inst.ID,
+							studio.Adjustment{Delta: delta, Relative: true})
+						if err != nil {
+							return change, err
+						}
+					}
+					return change, nil
+				},
+				sync: func(ctx context.Context, d daw.DAW) error {
+					for _, c := range jackCues {
+						cue, err := session.Cue(c.CueID)
+						if err != nil {
+							return err
+						}
+						if err := d.SetSendLevel(ctx, c.CueID, inst.ID, cue.Level(inst.ID)); err != nil {
+							return err
+						}
+					}
+					return nil
+				},
+			})
+		}
+		tabs = append(tabs, p)
 	}
 
 	fx := tab{title: "FX"}

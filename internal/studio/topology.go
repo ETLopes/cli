@@ -70,6 +70,11 @@ type Topology struct {
 	Instruments []Instrument
 	Main        Bus
 	Cues        []Bus
+	// Phones are the interface's headphone jacks. They are not extra outputs:
+	// a jack is wired to a pair of line outputs and carries whatever those
+	// already carry, so this is a view onto the cues rather than an allocation
+	// of its own, and it is allowed to overlap them.
+	Phones []OutputPair
 }
 
 // defaultInstruments is the rig this was built against, and the fallback when
@@ -91,13 +96,72 @@ var defaultInstruments = []Instrument{
 // a value through every caller.
 var current = DefaultTopology()
 
+// defaultPhones are the Scarlett 18i20's two front-panel headphone jacks.
+//
+// They are fixed in hardware, not chosen: Focusrite's manual states that
+// Headphones 1 always carries whatever is routed to line outputs 7/8, and
+// Headphones 2 follows 9/10. So a jack is a second tap on outputs the rig has
+// already assigned, and plugging in does not take anything away from the
+// headphone amplifier those outputs also feed.
+var defaultPhones = []OutputPair{{Left: 7, Right: 8}, {Left: 9, Right: 10}}
+
 // DefaultTopology returns the built-in rig.
 func DefaultTopology() Topology {
 	return Topology{
 		Instruments: append([]Instrument(nil), defaultInstruments...),
 		Main:        Bus{ID: "main", Name: "MAIN", Output: OutputPair{1, 2}},
 		Cues:        append([]Bus(nil), defaultCues...),
+		Phones:      append([]OutputPair(nil), defaultPhones...),
 	}
+}
+
+// PhoneJacks returns the headphone jacks, in order.
+func PhoneJacks() []OutputPair { return append([]OutputPair(nil), current.Phones...) }
+
+// PhoneCount is how many headphone jacks the interface has.
+func PhoneCount() int { return len(current.Phones) }
+
+// PhoneCues returns the cue buses a headphone jack carries, left ear first.
+//
+// A jack hears whatever its two line outputs hold, so with one mono cue per
+// output that is two different mixes, one per ear. Naming them is what lets
+// the interface move both together and give the wearer a coherent mix.
+func PhoneCues(jack int) ([]Bus, bool) {
+	if jack < 1 || jack > len(current.Phones) {
+		return nil, false
+	}
+	var out []Bus
+	for _, ch := range current.Phones[jack-1].Channels() {
+		for _, c := range current.Cues {
+			for _, cc := range c.Output.Channels() {
+				if cc == ch {
+					out = append(out, c)
+				}
+			}
+		}
+	}
+	return out, true
+}
+
+// PhoneJackOf names the jack and ear a cue bus feeds, or false when the cue
+// reaches no headphone jack. A mix that is audible in two places is worth
+// saying so where it is edited.
+func PhoneJackOf(b Bus) (jack int, ear string, ok bool) {
+	for i, p := range current.Phones {
+		chans := p.Channels()
+		for _, bc := range b.Output.Channels() {
+			for j, pc := range chans {
+				if pc == bc {
+					side := ""
+					if len(chans) == 2 {
+						side = []string{"L", "R"}[j]
+					}
+					return i + 1, side, true
+				}
+			}
+		}
+	}
+	return 0, "", false
 }
 
 // Use installs a topology, after checking it describes a workable studio.
@@ -313,6 +377,15 @@ func (t Topology) Validate() error {
 				return fmt.Errorf("output %d is claimed by both %q and %q", ch, prev, b.ID)
 			}
 			usedOutputs[ch] = b.ID
+		}
+	}
+
+	// A headphone jack is stereo by construction, and it deliberately shares
+	// its channels with the cues, so it is not part of the overlap check
+	// above.
+	for i, p := range t.Phones {
+		if p.Left < 1 || p.Right < 1 {
+			return fmt.Errorf("headphone jack %d needs a stereo output pair", i+1)
 		}
 	}
 

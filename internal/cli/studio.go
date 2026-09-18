@@ -109,6 +109,7 @@ Run with no arguments for the interactive mixer.`,
 		newStudioSetupCmd(e),
 		newStudioStatusCmd(e),
 		newStudioCueCmd(e),
+		newStudioPhonesCmd(e),
 		newStudioMonitorCmd(e),
 		newStudioTuneCmd(e),
 		newStudioSyncCmd(e),
@@ -396,6 +397,77 @@ written with a leading "@".`,
 				return err
 			}
 			ui.Println(ui.Success(fmt.Sprintf("cue %d %s: %s", cueID, in.Name, change)))
+			return nil
+		},
+	}
+}
+
+// newStudioPhonesCmd drives the interface's own headphone jacks.
+//
+// A jack is not an extra output: it is wired to a pair of line outputs and
+// carries whatever those already hold. With one mono cue per output that means
+// each ear hears a different mix, which is why setting a level here moves every
+// cue the jack touches at once rather than one of them.
+func newStudioPhonesCmd(e *env) *cobra.Command {
+	return &cobra.Command{
+		Use:   "phones <jack> <instrument> <level>",
+		Short: i18n.T("cmd.phones.short"),
+		Long: `Sets how loud one instrument is in a headphone jack on the interface.
+
+The jacks are wired to line outputs, so a jack carries the cues already on
+those outputs -- one per ear. Setting a level here moves both together, so
+what the wearer hears is one coherent mix rather than two different ones.
+
+  cli studio phones 1 guitar +3     three decibels louder
+  cli studio phones 2 bass @-6      set to exactly -6 dB
+  cli studio phones 1 drums off     silence it
+
+Levels read the same way as 'cli studio cue'.`,
+		Args: cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			jack, err := strconv.Atoi(args[0])
+			if err != nil || jack < 1 {
+				return fmt.Errorf("%q is not a headphone jack (1-%d)", args[0], studio.PhoneCount())
+			}
+			cues, ok := studio.PhoneCues(jack)
+			if !ok {
+				return fmt.Errorf("this interface has %d headphone jack(s), not %d",
+					studio.PhoneCount(), jack)
+			}
+			if len(cues) == 0 {
+				return fmt.Errorf(
+					"headphone jack %d is wired to outputs %s, which no cue mix feeds",
+					jack, studio.PhoneJacks()[jack-1])
+			}
+			adj, err := studio.ParseAdjustment(args[2])
+			if err != nil {
+				return err
+			}
+
+			s, err := openStudio(e)
+			if err != nil {
+				return err
+			}
+			in, ok := studio.LookupInstrument(args[1])
+			if !ok {
+				return fmt.Errorf("unknown instrument %q (available: %s)",
+					args[1], strings.Join(studio.InstrumentIDs(), ", "))
+			}
+
+			for _, c := range cues {
+				cueID := c.CueID
+				change, cerr := s.session.SetCueLevel(cueID, in.ID, adj)
+				if cerr != nil {
+					return cerr
+				}
+				if perr := s.push(cmd.Context(), func(ctx context.Context) error {
+					return s.dawc.SetSendLevel(ctx, cueID, in.ID, change.To)
+				}); perr != nil {
+					return perr
+				}
+				ui.Println(ui.Success(fmt.Sprintf("phones %d %s (%s): %s",
+					jack, in.Name, c.Name, change)))
+			}
 			return nil
 		},
 	}

@@ -124,6 +124,12 @@ var en = map[string]string{
 	"set.unsaved":       "unsaved changes",
 	"set.title":         "settings",
 
+	"cmd.phones.short": "Set an instrument's level in a headphone jack on the interface",
+
+	"phones.title":  "PHONES %d",
+	"phones.feeds":  "outputs %s \u00b7 also %s",
+	"phones.nocues": "no cue mix reaches this jack",
+
 	// Input patching.
 	"patch.input":     "input",
 	"patch.inputs":    "inputs",

@@ -153,3 +153,88 @@ func TestUnknownKindIsRefused(t *testing.T) {
 		t.Fatal("a topology with an unknown kind validated")
 	}
 }
+
+// A headphone jack on the interface is wired to a pair of line outputs and
+// carries whatever they already hold. On this rig that is two mono cues, one
+// per ear, which is exactly the thing worth naming.
+func TestHeadphoneJacksCarryTheCuesOnTheirOutputs(t *testing.T) {
+	restore := Current()
+	defer func() { _ = Use(restore) }()
+	if err := Use(DefaultTopology()); err != nil {
+		t.Fatalf("the default rig was refused: %v", err)
+	}
+
+	if got := PhoneCount(); got != 2 {
+		t.Fatalf("the interface has %d jacks, want 2", got)
+	}
+	for jack, want := range map[int][]string{
+		1: {"CUE 5", "CUE 6"}, // line outputs 7/8
+		2: {"CUE 7", "CUE 8"}, // line outputs 9/10
+	} {
+		cues, ok := PhoneCues(jack)
+		if !ok {
+			t.Fatalf("jack %d does not exist", jack)
+		}
+		if len(cues) != len(want) {
+			t.Fatalf("jack %d carries %d cue(s), want %d", jack, len(cues), len(want))
+		}
+		for i, name := range want {
+			if cues[i].Name != name {
+				t.Errorf("jack %d ear %d is %q, want %q", jack, i+1, cues[i].Name, name)
+			}
+		}
+	}
+
+	// Asking the other way round has to agree, since that is what labels a
+	// cue page with the jack it is also heard in.
+	for _, c := range CueBuses() {
+		jack, ear, ok := PhoneJackOf(c)
+		switch c.Name {
+		case "CUE 5":
+			if !ok || jack != 1 || ear != "L" {
+				t.Errorf("CUE 5 reports jack %d %q (ok=%v), want 1 L", jack, ear, ok)
+			}
+		case "CUE 8":
+			if !ok || jack != 2 || ear != "R" {
+				t.Errorf("CUE 8 reports jack %d %q (ok=%v), want 2 R", jack, ear, ok)
+			}
+		case "CUE 1", "CUE 2", "CUE 3", "CUE 4":
+			if ok {
+				t.Errorf("%s should reach no headphone jack, got %d", c.Name, jack)
+			}
+		}
+	}
+}
+
+// The jacks share their channels with the cues on purpose, so the overlap
+// check that guards the outputs must not refuse a perfectly good rig.
+func TestHeadphoneJacksMayShareCueOutputs(t *testing.T) {
+	def := DefaultTopology()
+	if err := def.Validate(); err != nil {
+		t.Fatalf("the default rig, whose jacks tap its cues, was refused: %v", err)
+	}
+	bad := DefaultTopology()
+	bad.Phones = []OutputPair{{Left: 7}}
+	if err := bad.Validate(); err == nil {
+		t.Error("a mono headphone jack was accepted; a jack is stereo by construction")
+	}
+}
+
+// An interface with no jacks configured still has the ones it physically has.
+func TestHeadphoneJacksSurviveACueOnlyConfig(t *testing.T) {
+	restore := Current()
+	defer func() { _ = Use(restore) }()
+	rig := DefaultTopology()
+	rig.Cues = rig.Cues[:2]
+	if err := Use(rig); err != nil {
+		t.Fatalf("a two-cue rig was refused: %v", err)
+	}
+	if PhoneCount() != 2 {
+		t.Errorf("the jacks vanished with the cue layout: %d", PhoneCount())
+	}
+	// Outputs 7-10 hold no cue now, so the jacks carry nothing. Saying so
+	// beats reporting a mix that is not there.
+	if cues, ok := PhoneCues(1); !ok || len(cues) != 0 {
+		t.Errorf("jack 1 reports %d cue(s) on outputs nothing feeds", len(cues))
+	}
+}

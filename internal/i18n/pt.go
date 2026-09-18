@@ -117,6 +117,11 @@ var pt = map[string]string{
 	"set.unsaved":       "alterações não salvas",
 	"set.title":         "configurações",
 
+	"cmd.phones.short": "Ajusta o nível de um instrumento em uma saída de fone da interface",
+	"phones.title":     "FONE %d",
+	"phones.feeds":     "saídas %s · também %s",
+	"phones.nocues":    "nenhum mix de fone chega nessa saída",
+
 	"patch.input":     "entrada",
 	"patch.inputs":    "entradas",
 	"patch.mono":      "mono",
