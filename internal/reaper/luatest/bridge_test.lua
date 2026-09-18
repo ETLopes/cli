@@ -6,6 +6,7 @@
 -- runs against someone's session.
 local deferred = nil
 local project = {}
+local audio_outs = 64
 
 local TAG_ROLE = "P_EXT:clistudio.role"
 
@@ -32,6 +33,9 @@ reaper = {
   Undo_EndBlock = function() end,
   TrackList_AdjustWindows = function() end,
   UpdateArrange = function() end,
+
+  -- How many hardware outputs the device offers. Overridden per check.
+  GetNumAudioOutputs = function() return audio_outs end,
 
   CountTracks = function() return #project end,
   GetTrack = function(_, i) return project[i + 1] end,
@@ -192,6 +196,20 @@ check("it is no longer managed", role_of(bass) == nil or role_of(bass) == "", ro
 -- Buses are managed too, and deleting the cues on every run would be the
 -- worst possible reading of "no longer in the topology".
 check("the buses survive", find_role("main") ~= nil and find_role("cue1") ~= nil, nil)
+
+-- A bus can be wired perfectly and still be silent, because REAPER was handed
+-- a narrower output range than the interface has. Nothing downstream reads as
+-- a fault, so setup has to be the one to say it.
+-- Two outputs is enough for MAIN on 1/2 and not for CUE 1 on output 3.
+project = {}
+audio_outs = 2
+acts = setup("guitar:Guitar:1")
+check("an output past the device is reported", count_kind(acts, "unreachable") == 1,
+  table.concat(acts, " "))
+audio_outs = 64
+acts = setup("guitar:Guitar:1")
+check("an output the device has is not", count_kind(acts, "unreachable") == 0,
+  table.concat(acts, " "))
 
 -- A monitor bus knocked off centre silences one speaker, and no amount of
 -- staring at the routing shows it. Setup puts a bus back in the middle.

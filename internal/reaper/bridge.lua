@@ -297,6 +297,13 @@ function ops.setup(args)
   reaper.PreventUIRefresh(1)
   reaper.Undo_BeginBlock()
 
+  -- How many hardware outputs the audio device actually offers REAPER. A bus
+  -- can be wired to output 10 in every respect and still be silent because
+  -- REAPER was given a narrower output range than the interface has, and
+  -- nothing downstream of that reads as a fault: the routing is perfect, the
+  -- meters move, and the socket is dead.
+  local nouts = reaper.GetNumAudioOutputs()
+
   -- Buses first: instrument sends need somewhere to land.
   local bus_tracks = {}
   for _, spec in ipairs(buses) do
@@ -309,6 +316,12 @@ function ops.setup(args)
     local where = mono and ("output " .. (chan + 1))
       or ("outputs " .. (chan + 1) .. "/" .. (chan + 2))
     if centred then where = where .. ", recentred" end
+
+    local need = mono and (chan + 1) or (chan + 2)
+    if need > nouts then
+      record("unreachable", "bus " .. name, string.format(
+        "needs output %d, but REAPER's audio device offers only %d", need, nouts))
+    end
     if created then
       record("created", "bus " .. name, where)
     elseif hw_created or hw_repaired or centred then

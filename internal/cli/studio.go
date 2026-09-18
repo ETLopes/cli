@@ -205,6 +205,10 @@ func runStudioSetup(ctx context.Context, st *studioEnv) error {
 			ui.Println(ui.Success(a.Object) + ui.Muted.Render("  "+a.Detail))
 		case "repaired":
 			ui.Println(ui.Warning(a.Object) + ui.Muted.Render("  "+a.Detail))
+		case "unreachable":
+			// Silence with correct-looking routing is the worst kind, so this
+			// is an error rather than a note in passing.
+			ui.Println(ui.Failure(a.Object) + ui.Muted.Render("  "+a.Detail))
 		case "removed", "retired":
 			// A track leaving the studio is worth saying out loud rather than
 			// listing quietly beside the ones that did not change.
