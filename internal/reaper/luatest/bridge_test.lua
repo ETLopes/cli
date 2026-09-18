@@ -193,5 +193,21 @@ check("it is no longer managed", role_of(bass) == nil or role_of(bass) == "", ro
 -- worst possible reading of "no longer in the topology".
 check("the buses survive", find_role("main") ~= nil and find_role("cue1") ~= nil, nil)
 
+-- A monitor bus knocked off centre silences one speaker, and no amount of
+-- staring at the routing shows it. Setup puts a bus back in the middle.
+project = {}
+setup("guitar:Guitar:1")
+find_role("main").vals.D_PAN = 1        -- hard right, as a stray drag leaves it
+find_role("cue1").vals.D_PAN = -1
+acts = setup("guitar:Guitar:1")
+check("the monitor bus is recentred", find_role("main").vals.D_PAN == 0, find_role("main").vals.D_PAN)
+check("the cue bus is recentred", find_role("cue1").vals.D_PAN == 0, find_role("cue1").vals.D_PAN)
+check("recentring is reported", count_kind(acts, "repaired") == 2, table.concat(acts, " "))
+
+-- An instrument's pan is a choice, not damage: leave it exactly alone.
+find_role("guitar").vals.D_PAN = -0.5
+setup("guitar:Guitar:1")
+check("an instrument keeps its pan", find_role("guitar").vals.D_PAN == -0.5, find_role("guitar").vals.D_PAN)
+
 print(fails == 0 and "\nALL LUA CHECKS PASSED" or ("\n" .. fails .. " LUA CHECKS FAILED"))
 os.exit(fails == 0 and 0 or 1)

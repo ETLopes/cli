@@ -155,6 +155,25 @@ local function ensure_hw_out(tr, chan, mono)
   return created, repaired
 end
 
+-- ensure_centred puts a bus back in the middle.
+--
+-- A bus is a destination, not a performance. The control room is stereo and
+-- each cue leaves on a single channel, so panning either of them only throws
+-- signal away: a monitor bus nudged off centre silences one speaker, and a cue
+-- panned away from channel one goes quiet in somebody's headphones. Both sound
+-- like a broken cable rather than a stray control, which is exactly why setup
+-- should put it back rather than leave it to be hunted down.
+--
+-- Instrument tracks are left alone. Panning those is the point of a pan
+-- control.
+local function ensure_centred(tr)
+  if reaper.GetMediaTrackInfo_Value(tr, "D_PAN") ~= 0 then
+    reaper.SetMediaTrackInfo_Value(tr, "D_PAN", 0)
+    return true
+  end
+  return false
+end
+
 -- ensure_input assigns a mono hardware input to a track, enables input
 -- monitoring, and arms it for record.
 --
@@ -254,11 +273,13 @@ function ops.setup(args)
     local tr, created = ensure_track(role, name)
     bus_tracks[role] = tr
     local hw_created, hw_repaired = ensure_hw_out(tr, chan, mono)
+    local centred = ensure_centred(tr)
     local where = mono and ("output " .. (chan + 1))
       or ("outputs " .. (chan + 1) .. "/" .. (chan + 2))
+    if centred then where = where .. ", recentred" end
     if created then
       record("created", "bus " .. name, where)
-    elseif hw_created or hw_repaired then
+    elseif hw_created or hw_repaired or centred then
       record("repaired", "bus " .. name, where)
     else
       record("unchanged", "bus " .. name, "")
@@ -721,17 +742,23 @@ end
 -- This is the one measurement that separates a routing problem from a
 -- hardware one: if nothing is arriving, no amount of correct routing inside
 -- REAPER will produce sound.
+-- peaks reports each channel separately as well as the louder of the two.
+--
+-- Separately, because the failure that needs seeing is a channel imbalance: a
+-- mono input reaching only channel 1 sounds exactly like a working studio on a
+-- meter that shows the maximum, and exactly like a broken one in the room.
 function ops.peaks(args)
   local out = {}
+  local function db_of(v)
+    if v <= 0 then return -150 end
+    return 20 * math.log(v, 10)
+  end
   for _, role in ipairs(split(args[1] or "", ",")) do
     local tr = find_managed(role)
     if tr then
-      local l = reaper.Track_GetPeakInfo(tr, 0)
-      local r = reaper.Track_GetPeakInfo(tr, 1)
-      local peak = math.max(l, r)
-      local db = -150
-      if peak > 0 then db = 20 * math.log(peak, 10) end
-      out[#out + 1] = role .. "|" .. string.format("%.1f", db)
+      local l = db_of(reaper.Track_GetPeakInfo(tr, 0))
+      local r = db_of(reaper.Track_GetPeakInfo(tr, 1))
+      out[#out + 1] = string.format("%s|%.1f|%.1f|%.1f", role, math.max(l, r), l, r)
     end
   end
   return table.concat(out, SEP)
@@ -764,6 +791,8 @@ function ops.verify(args)
       local chans = reaper.GetMediaTrackInfo_Value(tr, "I_NCHAN")
       local mainsend = reaper.GetMediaTrackInfo_Value(tr, "B_MAINSEND")
 
+      local pan = reaper.GetMediaTrackInfo_Value(tr, "D_PAN")
+
       local hw = "-"
       if reaper.GetTrackNumSends(tr, 1) > 0 then
         local dst = math.floor(reaper.GetTrackSendInfo_Value(tr, 1, 0, "I_DSTCHAN"))
@@ -788,7 +817,8 @@ function ops.verify(args)
 
       out[#out + 1] = table.concat({
         role, name, tostring(math.floor(rec)), tostring(math.floor(chans)),
-        tostring(math.floor(mainsend)), hw, table.concat(sends, " "),
+        tostring(math.floor(mainsend)), hw, string.format("%.2f", pan),
+        table.concat(sends, " "),
       }, "|")
     end
   end
