@@ -66,18 +66,18 @@ func TestBufferSourcePlaysSilenceWhilePausedAndKeepsItsPlace(t *testing.T) {
 
 func TestBufferSourceSeeksAndClamps(t *testing.T) {
 	src := NewBufferSource(stereoRamp(10))
-	src.Seek(7)
+	src.SeekTo(7)
 	dst := make([]float32, 2)
 	src.Read(dst)
 	if dst[0] != 8 {
-		t.Fatalf("after Seek(7) got %v, want 8", dst[0])
+		t.Fatalf("after SeekTo(7) got %v, want 8", dst[0])
 	}
-	src.Seek(-3)
+	src.SeekTo(-3)
 	if src.Position() != 0 {
-		t.Fatalf("Seek(-3) -> %d, want 0", src.Position())
+		t.Fatalf("SeekTo(-3) -> %d, want 0", src.Position())
 	}
-	src.Seek(99)
+	src.SeekTo(99)
 	if src.Position() != 10 || !src.Done() {
-		t.Fatalf("Seek(99) -> %d done=%v, want 10 true", src.Position(), src.Done())
+		t.Fatalf("SeekTo(99) -> %d done=%v, want 10 true", src.Position(), src.Done())
 	}
 }
