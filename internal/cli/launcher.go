@@ -39,6 +39,12 @@ func tools(e *env) []tool {
 			Run:   func(ctx context.Context) error { return runPrep(ctx, e, nil) },
 		},
 		{
+			Name:  "karaoke",
+			Short: i18n.T("tool.karaoke.short"),
+			Glyph: "♬",
+			Run:   func(ctx context.Context) error { return runKaraokeEntry(ctx, e) },
+		},
+		{
 			Name:  "studio",
 			Short: i18n.T("tool.studio.short"),
 			Glyph: "♫",

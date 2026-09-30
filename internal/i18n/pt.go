@@ -188,4 +188,15 @@ var pt = map[string]string{
 	"karaoke.err.not_ready":  "\"%s\" ainda não está preparada",
 	"karaoke.stale.age":      "a calibração tem %d dias",
 	"karaoke.stale.inputs":   "um microfone configurado nunca foi calibrado",
+
+	"cmd.karaoke.short":         "Cante qualquer música do YouTube e seja pontuado pela afinação",
+	"cmd.karaoke.long":          "Enfileira músicas do YouTube, prepara cada uma (base instrumental, melodia e letra sincronizada) e pontua a afinação de cada cantor ao vivo contra a melodia original.\n\nSem terminal, ou com --plain, as URLs são enfileiradas e preparadas em primeiro plano, uma linha por etapa.",
+	"tool.karaoke.short":        "Cante qualquer música e seja pontuado pela afinação",
+	"karaoke.plain.queue_reset": "a fila salva não pôde ser lida e foi movida para %s",
+	"karaoke.plain.duplicate":   "já está na fila: %s (%s)",
+	"karaoke.plain.queued":      "na fila: %s",
+	"karaoke.plain.nothing":     "nada para preparar",
+	"karaoke.plain.ready":       "pronta: %s",
+	"karaoke.plain.failed":      "falhou: %s: %s",
+	"karaoke.plain.failed_n":    "%d música(s) falharam ao preparar",
 }
