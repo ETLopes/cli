@@ -98,6 +98,54 @@ func (c *Checker) Check(ctx context.Context) Report {
 	}}
 }
 
+// swiftF0Package is the PyPI name of the pitch tracker installed beside Demucs;
+// its import name is swift_f0.
+const swiftF0Package = "swift-f0"
+
+// CheckKaraoke reports on everything the karaoke tool needs: the dtx tools plus
+// swift-f0 and deno. Karaoke always downloads and always scores pitch, so
+// unlike dtx it cannot do anything useful without them.
+//
+// It is a separate entry point rather than an option on Check so that dtx's
+// required set, and therefore `cli dtx` and `dtx doctor`, stay exactly as they
+// were.
+func (c *Checker) CheckKaraoke(ctx context.Context) Report {
+	r := c.Check(ctx)
+	r.Tools = append(r.Tools, c.swiftF0Status(ctx))
+	for i := range r.Tools {
+		if r.Tools[i].Name == denoTool {
+			r.Tools[i].Required = true
+		}
+	}
+	return r
+}
+
+// swiftF0Status asks the managed interpreter for the installed swift-f0
+// version. Path is the interpreter, since the package has no executable. It is
+// required because it is only queried by CheckKaraoke.
+func (c *Checker) swiftF0Status(ctx context.Context) Status {
+	s := Status{
+		Name:     swiftF0Package,
+		Required: true,
+		Managed:  true,
+		Hint:     "run 'cli dtx doctor --install' to set it up automatically",
+	}
+	python := venvBin("python")
+	if _, err := os.Stat(python); err != nil {
+		return s
+	}
+	res, err := c.Run.Run(ctx, runner.Spec{
+		Name: python,
+		Args: []string{"-c", "import importlib.metadata as m; print(m.version('" + swiftF0Package + "'))"},
+	})
+	if err != nil {
+		return s
+	}
+	s.Path = python
+	s.Version = strings.TrimSpace(firstLine(res.Stdout))
+	return s
+}
+
 // denoTool is the JavaScript runtime yt-dlp needs to solve YouTube's player
 // challenges (Deno 2.3 or newer by default).
 //
