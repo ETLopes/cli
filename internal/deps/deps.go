@@ -94,8 +94,18 @@ func (c *Checker) Check(ctx context.Context) Report {
 		c.probe(ctx, youtube.Tool, true, false, "brew install yt-dlp", "--version"),
 		c.demucsStatus(ctx),
 		c.probe(ctx, uvTool, false, false, "brew install uv", "--version"),
+		c.probe(ctx, denoTool, false, false, "brew install deno", "--version"),
 	}}
 }
+
+// denoTool is the JavaScript runtime yt-dlp needs to solve YouTube's player
+// challenges (Deno 2.3 or newer by default).
+//
+// It is optional for dtx: dtx also works from local files, and yt-dlp still
+// handles many non-YouTube sources without a runtime, so refusing to run at
+// all on a machine without deno would take away working behavior. The karaoke
+// report, which always downloads, marks it required instead.
+const denoTool = "deno"
 
 // probe locates a tool and asks it for its version.
 func (c *Checker) probe(ctx context.Context, name string, required, managed bool, hint string, versionArgs ...string) Status {
