@@ -327,7 +327,16 @@ func (e *env) setup(cmd *cobra.Command, cfgFile string) error {
 }
 
 // bindChangedFlags maps explicitly-set flags onto their config keys.
+//
+// Every entry in flagToConfigKey is a dtx setting, so only the dtx command
+// tree binds them. Other tools reuse the same short names for their own
+// purposes (karaoke export takes --out for its own folder, and a karaoke
+// --device would name an audio interface, not a Demucs device); binding by
+// name alone would quietly repoint dtx settings from those commands.
 func bindChangedFlags(cmd *cobra.Command, v *viper.Viper) {
+	if !inCommandTree(cmd, "dtx") {
+		return
+	}
 	cmd.Flags().VisitAll(func(f *pflag.Flag) {
 		if !f.Changed {
 			return
@@ -344,6 +353,17 @@ func bindChangedFlags(cmd *cobra.Command, v *viper.Viper) {
 		}
 		v.Set(key, f.Value.String())
 	})
+}
+
+// inCommandTree reports whether cmd is the named command or one of its
+// subcommands.
+func inCommandTree(cmd *cobra.Command, name string) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		if c.Name() == name {
+			return true
+		}
+	}
+	return false
 }
 
 // flagToConfigKey maps flag names to config keys. Flags without an entry are
