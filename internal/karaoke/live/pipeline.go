@@ -78,9 +78,6 @@ type pipeline struct {
 	fed      int64 // 16 kHz samples given to the chains
 	skips    []skip
 
-	// noScore skips the scorer, for the allocation test: score.Scorer.Push
-	// allocates and lives outside this package.
-	noScore bool
 	// tap, if set, sees every frame pushed to a scorer. Tests use it to
 	// compare a live run with a batch score of the same frames.
 	tap func(lane int, f score.Frame)
@@ -274,7 +271,7 @@ func (p *pipeline) emit(l *lane, f dsp.Frame) {
 	l.level.Store(math.Float64bits(dbfs(micPow)))
 	l.sungMIDI.Store(math.Float64bits(sf.MIDI))
 	l.isVoiced.Store(sf.Voiced)
-	if !ok || p.noScore {
+	if !ok {
 		return
 	}
 	sf.T = time.Duration(song / float64(p.rate) * float64(time.Second))
