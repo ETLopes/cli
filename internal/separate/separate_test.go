@@ -272,3 +272,108 @@ func TestIsDeviceError(t *testing.T) {
 		t.Error("nil is not a device error")
 	}
 }
+
+func TestTwoStemRequestPassesTheStemAndReturnsBothTracks(t *testing.T) {
+	dir := t.TempDir()
+	f := fakeDemucs([]string{"vocals", "no_vocals"})
+
+	stems, err := New(f).Separate(context.Background(), "in.m4a", dir, Options{TwoStems: "vocals"}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got, _ := f.CallsTo("demucs")[0].ArgAfter("--two-stems"); got != "vocals" {
+		t.Errorf("--two-stems = %q, want vocals", got)
+	}
+	names := make([]string, len(stems))
+	for i, s := range stems {
+		names[i] = s.Name
+	}
+	if strings.Join(names, ",") != "no_vocals,vocals" {
+		t.Errorf("stems = %v, want no_vocals and vocals", names)
+	}
+}
+
+func TestFourStemRunNeverPassesTwoStems(t *testing.T) {
+	f := fakeDemucs([]string{"vocals", "drums", "bass", "other"})
+
+	if _, err := New(f).Separate(context.Background(), "in.m4a", t.TempDir(), Options{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if f.CallsTo("demucs")[0].HasArg("--two-stems") {
+		t.Error("the default 4-stem run must not pass --two-stems")
+	}
+}
+
+// Demucs writes into <out>/<model>/, so without the mode in the path a cached
+// 4-stem run would be handed back to a caller who asked for a vocal split.
+func TestTwoStemRequestIgnoresFourStemCache(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeStems(dir, ModelDefault, []string{"vocals", "drums", "bass", "other"}); err != nil {
+		t.Fatal(err)
+	}
+	f := fakeDemucs([]string{"vocals", "no_vocals"})
+
+	stems, err := New(f).Separate(context.Background(), "in.m4a", dir, Options{TwoStems: "vocals"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(f.CallsTo("demucs")); got != 1 {
+		t.Errorf("demucs ran %d times, want 1 because the 4-stem cache does not apply", got)
+	}
+	if len(stems) != 2 {
+		t.Errorf("got %d stems, want the 2 from the two-stem run", len(stems))
+	}
+}
+
+func TestTwoStemCacheIsReused(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeStems(outputRoot(dir, Options{TwoStems: "vocals"}), ModelDefault, []string{"vocals", "no_vocals"}); err != nil {
+		t.Fatal(err)
+	}
+	f := fakeDemucs(nil)
+
+	stems, err := New(f).Separate(context.Background(), "in.m4a", dir, Options{TwoStems: "vocals"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(f.CallsTo("demucs")); got != 0 {
+		t.Errorf("demucs ran %d times, want 0 with a two-stem cache", got)
+	}
+	if len(stems) != 2 {
+		t.Errorf("got %d stems, want 2 from the cache", len(stems))
+	}
+}
+
+func TestFourStemRequestIgnoresTwoStemCache(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeStems(outputRoot(dir, Options{TwoStems: "vocals"}), ModelDefault, []string{"vocals", "no_vocals"}); err != nil {
+		t.Fatal(err)
+	}
+	f := fakeDemucs([]string{"vocals", "drums", "bass", "other"})
+
+	stems, err := New(f).Separate(context.Background(), "in.m4a", dir, Options{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(f.CallsTo("demucs")); got != 1 {
+		t.Errorf("demucs ran %d times, want 1 because the two-stem cache does not apply", got)
+	}
+	if len(stems) != 4 {
+		t.Errorf("got %d stems, want the 4 from the fresh run", len(stems))
+	}
+}
+
+func TestTwoStemCachesForDifferentStemsAreSeparate(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeStems(outputRoot(dir, Options{TwoStems: "drums"}), ModelDefault, []string{"drums", "no_drums"}); err != nil {
+		t.Fatal(err)
+	}
+	f := fakeDemucs([]string{"vocals", "no_vocals"})
+
+	if _, err := New(f).Separate(context.Background(), "in.m4a", dir, Options{TwoStems: "vocals"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(f.CallsTo("demucs")); got != 1 {
+		t.Errorf("demucs ran %d times, want 1 because the drums cache does not apply", got)
+	}
+}
