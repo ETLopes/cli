@@ -44,7 +44,7 @@ func newKaraokeDoctorCmd(e *env) *cobra.Command {
 			printReport(report)
 			if install && !report.Ready() {
 				ui.Println()
-				if _, err := installDemucs(ctx, e, checker); err != nil {
+				if _, err := installManaged(ctx, e, checker, report); err != nil {
 					return err
 				}
 				report = checker.CheckKaraoke(ctx)

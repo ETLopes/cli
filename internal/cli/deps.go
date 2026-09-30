@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 
 	"charm.land/huh/v2"
@@ -69,11 +70,91 @@ func ensureToolsWith(ctx context.Context, e *env, check func(*deps.Checker, cont
 		return &toolset{report: report, demucsPath: st.Path}, nil
 	}
 
-	path, err := installDemucs(ctx, e, checker)
+	path, err := installManaged(ctx, e, checker, report)
 	if err != nil {
 		return nil, err
 	}
 	return &toolset{report: check(checker, ctx), demucsPath: path}, nil
+}
+
+// installManaged provisions whichever managed tools the report says are
+// missing, returning the Demucs path. When swift-f0 is all that is missing
+// it is added to the existing environment, rather than rebuilding the whole
+// thing and downloading PyTorch again.
+func installManaged(ctx context.Context, e *env, checker *deps.Checker, report deps.Report) (string, error) {
+	_, err := os.Stat(deps.VenvPython())
+	if !onlySwiftF0Missing(report.Missing(), err == nil) {
+		return installDemucs(ctx, e, checker)
+	}
+	if err := installSwiftF0(ctx, e, checker); err != nil {
+		return "", err
+	}
+	st, _ := report.Lookup(separate.Tool)
+	return st.Path, nil
+}
+
+// onlySwiftF0Missing reports whether swift-f0 is the only managed tool
+// missing and there is an environment already there to add it to.
+func onlySwiftF0Missing(missing []deps.Status, envExists bool) bool {
+	if !envExists {
+		return false
+	}
+	found := false
+	for _, m := range missing {
+		if !m.Managed {
+			continue
+		}
+		if m.Name != deps.SwiftF0Package {
+			return false
+		}
+		found = true
+	}
+	return found
+}
+
+// installSwiftF0 adds swift-f0 to the managed environment, confirming first
+// like installDemucs does, though the download is only tens of megabytes.
+func installSwiftF0(ctx context.Context, e *env, checker *deps.Checker) error {
+	if e.interactive() {
+		var confirmed bool
+		err := huh.NewForm(huh.NewGroup(
+			huh.NewConfirm().
+				Title("swift-f0 is not installed.").
+				Description("karaoke uses it to trace the original melody. It is added to the\nexisting environment at " + deps.VenvDir() +
+					"\n\nDemucs stays as it is; the download is a few tens of megabytes.").
+				Affirmative("Install it").
+				Negative("Cancel").
+				Value(&confirmed),
+		)).RunWithContext(ctx)
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			return fmt.Errorf("swift-f0 is required to score pitch; re-run and accept the prompt")
+		}
+	} else if !e.assumeYes {
+		return fmt.Errorf("swift-f0 is not installed; re-run interactively, pass --yes to install it automatically, or run 'cli karaoke doctor --install'")
+	}
+
+	ui.Println(ui.Muted.Render(ui.GlyphBullet + " Installing swift-f0."))
+	if err := checker.InstallSwiftF0(ctx, installerLine); err != nil {
+		return err
+	}
+	ui.Println(ui.Success("swift-f0 installed"))
+	return nil
+}
+
+// installerLine surfaces uv's progress milestones verbatim and logs the rest.
+func installerLine(_ runner.Stream, line string) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return
+	}
+	slog.Debug("installer", "line", line)
+	if strings.HasPrefix(line, "Resolved") || strings.HasPrefix(line, "Installed") ||
+		strings.HasPrefix(line, "Prepared") || strings.HasPrefix(line, "Using") {
+		ui.Println(ui.Muted.Render("    " + line))
+	}
 }
 
 // installDemucs provisions the managed Demucs environment, confirming first
@@ -102,21 +183,7 @@ func installDemucs(ctx context.Context, e *env, checker *deps.Checker) (string, 
 
 	ui.Println(ui.Muted.Render(ui.GlyphBullet + " Installing demucs; this takes a few minutes."))
 
-	onLine := func(_ runner.Stream, line string) {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			return
-		}
-		slog.Debug("installer", "line", line)
-		// uv reports progress in a compact form worth surfacing verbatim,
-		// but only the meaningful milestones.
-		if strings.HasPrefix(line, "Resolved") || strings.HasPrefix(line, "Installed") ||
-			strings.HasPrefix(line, "Prepared") || strings.HasPrefix(line, "Using") {
-			ui.Println(ui.Muted.Render("    " + line))
-		}
-	}
-
-	path, err := checker.InstallDemucs(ctx, onLine)
+	path, err := checker.InstallDemucs(ctx, installerLine)
 	if errors.Is(err, deps.ErrSwiftF0) && path != "" {
 		// swift-f0 is only for karaoke; demucs works, so dtx must not fail.
 		ui.Println(ui.Muted.Render(ui.GlyphBullet + " " + err.Error()))

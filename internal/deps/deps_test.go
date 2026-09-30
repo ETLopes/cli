@@ -349,3 +349,59 @@ func TestVenvPythonLivesInsideTheManagedEnvironment(t *testing.T) {
 		t.Errorf("VenvPython() = %q, want a python inside %q", got, VenvDir())
 	}
 }
+
+func TestSwiftF0AloneIsAddedToTheExistingEnvironmentWithoutRebuildingIt(t *testing.T) {
+	fakePath(t, "uv")
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	python := VenvPython()
+	if err := os.MkdirAll(filepath.Dir(python), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(python, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := installFake("")
+
+	if err := NewChecker(f).InstallSwiftF0(context.Background(), nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, c := range f.Calls() {
+		if filepath.Base(c.Name) == "uv" && len(c.Args) > 0 && c.Args[0] == "venv" {
+			t.Errorf("rebuilt the environment: %v", c.Args)
+		}
+	}
+	if got := strings.Join(installedPackages(f), ","); got != "swift-f0" {
+		t.Errorf("installed %s, want only swift-f0", got)
+	}
+	var imports int
+	for _, c := range f.Calls() {
+		if c.Name == python && c.HasArg("import swift_f0") {
+			imports++
+		}
+	}
+	if imports != 1 {
+		t.Errorf("swift_f0 import checks = %d, want 1", imports)
+	}
+}
+
+func TestSwiftF0AloneNeedsAnEnvironmentToAddItTo(t *testing.T) {
+	fakePath(t, "uv")
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	f := installFake("")
+
+	err := NewChecker(f).InstallSwiftF0(context.Background(), nil)
+	if !errors.Is(err, ErrNoManagedEnvironment) {
+		t.Fatalf("err = %v, want ErrNoManagedEnvironment", err)
+	}
+	if n := len(f.Calls()); n != 0 {
+		t.Errorf("ran %d commands, want none", n)
+	}
+}
+
+func TestTheSwiftF0HintPointsAtTheKaraokeDoctor(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	st, _ := NewChecker(runnertest.New()).CheckKaraoke(context.Background()).Lookup(SwiftF0Package)
+	if !strings.Contains(st.Hint, "cli karaoke doctor --install") {
+		t.Errorf("hint = %q, want it to name cli karaoke doctor --install", st.Hint)
+	}
+}
