@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -286,4 +287,84 @@ func (a *karaokeApp) ExportDir(ctx context.Context, songDir, outDir string) (ult
 		outDir = a.cfg.ExportDir
 	}
 	return ultrastar.Export(ctx, sg, outDir, audio.New(a.run))
+}
+
+// MicLevel is how loud one microphone was over a short recording.
+type MicLevel struct {
+	Channel int
+	Name    string
+	// RMSDBFS and PeakDBFS are -Inf for digital silence.
+	RMSDBFS, PeakDBFS float64
+	// Silent means every sample was exactly zero, which a live microphone never
+	// produces: the operating system is withholding the audio.
+	Silent bool
+}
+
+// MicLevels records d from the configured inputs and reports each one's level.
+func (a *karaokeApp) MicLevels(ctx context.Context, d time.Duration) ([]MicLevel, error) {
+	dev, err := a.Device()
+	if err != nil {
+		return nil, err
+	}
+	stream, err := a.backend.Open(audioio.StreamConfig{
+		DeviceName: dev.Name,
+		Inputs:     a.cfg.InputChannels(),
+		Outputs:    a.cfg.OutputPair(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer stream.Close()
+	if err := stream.Start(); err != nil {
+		return nil, err
+	}
+
+	pump := a.pump
+	if pump == nil {
+		pump = func(ctx context.Context, s audioio.Stream, frames int) error {
+			t := time.NewTimer(time.Duration(frames) * time.Second / time.Duration(s.SampleRate()))
+			defer t.Stop()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-t.C:
+				return nil
+			}
+		}
+	}
+
+	n := len(a.cfg.Inputs)
+	sumSq, peak, count := make([]float64, n), make([]float64, n), make([]float64, n)
+	buf := make([]float32, 4096)
+	step := stream.SampleRate() / 50
+	for elapsed := 0; elapsed < int(d/time.Millisecond)/20; elapsed++ {
+		if err := pump(ctx, stream, step); err != nil {
+			return nil, err
+		}
+		for i := range n {
+			for {
+				got := stream.Capture(i).Read(buf)
+				if got == 0 {
+					break
+				}
+				for _, v := range buf[:got] {
+					f := float64(v)
+					sumSq[i] += f * f
+					peak[i] = max(peak[i], math.Abs(f))
+				}
+				count[i] += float64(got)
+			}
+		}
+	}
+
+	out := make([]MicLevel, n)
+	for i, in := range a.cfg.Inputs {
+		l := MicLevel{Channel: in.Channel, Name: in.Name, RMSDBFS: math.Inf(-1), PeakDBFS: math.Inf(-1), Silent: peak[i] == 0}
+		if !l.Silent {
+			l.RMSDBFS = 10 * math.Log10(sumSq[i]/count[i])
+			l.PeakDBFS = 20 * math.Log10(peak[i])
+		}
+		out[i] = l
+	}
+	return out, nil
 }
