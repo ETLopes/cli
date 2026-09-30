@@ -261,9 +261,8 @@ func (s *Scorer) Push(frames ...Frame) {
 	if s.done {
 		return
 	}
-	if !sort.SliceIsSorted(frames, func(i, j int) bool { return frames[i].T < frames[j].T }) {
-		frames = append([]Frame(nil), frames...)
-		sort.SliceStable(frames, func(i, j int) bool { return frames[i].T < frames[j].T })
+	if !framesSorted(frames) {
+		frames = sortedCopy(frames)
 	}
 	for _, f := range frames {
 		s.latest = max(s.latest, f.T)
@@ -309,7 +308,29 @@ func (s *Scorer) advance(all bool) {
 		s.next++
 	}
 	cut := sort.Search(len(s.frames), func(i int) bool { return s.frames[i].T >= s.refTime(s.next)-s.slack })
-	s.frames = s.frames[cut:]
+	// Shift down rather than reslice, so the buffer keeps its capacity and
+	// steady-state pushes never reallocate.
+	s.frames = s.frames[:copy(s.frames, s.frames[cut:])]
+}
+
+// sortedCopy is the rare path for unordered input. It is a function of its own
+// so that boxing the copy for sort.SliceStable does not make Push's argument
+// escape, which would cost every call an allocation.
+func sortedCopy(frames []Frame) []Frame {
+	out := append([]Frame(nil), frames...)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].T < out[j].T })
+	return out
+}
+
+// framesSorted reports whether frames are in time order, without the
+// allocation sort.SliceIsSorted makes boxing its argument.
+func framesSorted(frames []Frame) bool {
+	for i := 1; i < len(frames); i++ {
+		if frames[i].T < frames[i-1].T {
+			return false
+		}
+	}
+	return true
 }
 
 // finalize decides one voiced reference frame from the best sung frame in its
