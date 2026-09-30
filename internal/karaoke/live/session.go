@@ -408,7 +408,7 @@ func (s *Session) iterate(ctx context.Context) (bool, error) {
 		// and everything until the ring's next sample is lost.
 		if gap := int64(st.Frames.Load()) - int64(s.stream.Reference().Len()) - s.consumed; gap > 0 {
 			s.pipe.skip(gap)
-			s.rec.gap(s.consumed, gap)
+			s.rec.gap(gap)
 			s.consumed += gap
 		}
 	}
