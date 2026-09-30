@@ -38,8 +38,10 @@ const (
 	cancRegAbs      = 1e-10 // floor of the innovation variance
 	cancDivergeBlk  = 60    // blocks of output louder than 2x mic before a reset
 	cancWarmBlocks  = 80    // blocks before the smoothed error powers are trusted
-	cancActiveRatio = 50.0 // foreground error this far above its floor may be near-end speech
-	cancExplained   = 0.5   // background error below this share of the foreground's means the reference explains it
+	cancActiveRatio = 30.0  // fraction-of-mic error this far above its floor may be near-end speech
+	cancCohParts    = 4     // reference partitions the coherence looks across
+	cancCohMin      = 0.75  // coherence of error and echo estimate above which the error is echo
+	cancCohSmooth   = 0.9   // per-block smoothing of the coherence spectra
 	cancFloorRise   = 1.002 // per-block rise of the foreground error floor
 )
 
@@ -61,8 +63,14 @@ type path struct {
 // produces the output. When the background's smoothed error is consistently
 // lower than the foreground's it is copied over the foreground; when it is
 // clearly worse (it absorbed a singer and diverged) it is reset to the
-// foreground. A singer entering can therefore at worst stall improvement: the
-// foreground keeps its converged cancellation.
+// foreground. The background also absorbs part of a singer and so can look
+// better in total error, so a copy is refused while near-end speech dominates
+// the foreground error: the error is a rising share of the microphone energy
+// and the reference does not explain it (low coherence between the error and
+// the recent reference frames, which residual echo after a room change has
+// and a singer does not). A singer entering can therefore at worst stall
+// improvement: the foreground keeps its converged cancellation, and a real
+// echo-path change still gets its copy.
 //
 // # Step control
 //
@@ -102,18 +110,23 @@ type Canceller struct {
 	bg   path
 	unc  [][]float64 // weight uncertainty of the background filter, per partition and bin
 
-	frame    []float64
-	acc, ef  []complex128
-	see      []float64 // smoothed |E|^2 per bin: the observation noise
-	innov    []float64 // innovation variance per bin
-	psi      []float64 // observation noise per bin
-	pFg, pBg float64   // smoothed error powers of the two paths
-	pMic     float64
-	test     pairedTest // background against foreground
-	floorFg  float64    // slowly rising minimum of pFg
-	warm     int        // blocks seen, up to cancWarmBlocks
-	nearEnd  bool       // the foreground error rose and the reference does not explain it
-	louder   int
+	frame     []float64
+	acc, ef   []complex128
+	see       []float64 // smoothed |E|^2 per bin: the observation noise
+	innov     []float64 // innovation variance per bin
+	psi       []float64 // observation noise per bin
+	pFg, pBg  float64   // smoothed error powers of the two paths
+	pMic      float64
+	test      pairedTest   // background against foreground
+	floorR    float64      // slowly rising minimum of pFg/pMic
+	ff        []complex128 // spectrum of the foreground error
+	cohParts  int
+	sey       []complex128 // smoothed cross spectrum of the two
+	see2, syy []float64    // smoothed auto spectra of the two
+	coh       float64      // their mean coherence over the bins with echo
+	warm      int          // blocks seen, up to cancWarmBlocks
+	nearEnd   bool         // the foreground error rose and the reference does not explain it
+	louder    int
 }
 
 // NewCanceller builds a canceller with zero weights.
@@ -146,6 +159,9 @@ func NewCanceller(cfg CancellerConfig) (*Canceller, error) {
 	}
 	c.frame = make([]float64, fft.Size())
 	c.acc, c.ef = make([]complex128, c.bins), make([]complex128, c.bins)
+	c.cohParts = min(c.p, cancCohParts)
+	c.ff, c.sey = make([]complex128, c.bins), make([]complex128, c.cohParts*c.bins)
+	c.see2, c.syy = make([]float64, c.bins), make([]float64, c.cohParts*c.bins)
 	c.see, c.innov, c.psi = make([]float64, c.bins), make([]float64, c.bins), make([]float64, c.bins)
 	c.Reset()
 	return c, nil
@@ -172,7 +188,10 @@ func (c *Canceller) Reset() {
 	clear(c.see)
 	clear(c.psi)
 	c.pFg, c.pBg, c.pMic = 0, 0, 0
-	c.floorFg, c.warm, c.nearEnd = 0, 0, false
+	c.floorR, c.warm, c.nearEnd, c.coh = 0, 0, false, 0
+	clear(c.sey)
+	clear(c.see2)
+	clear(c.syy)
 	c.louder = 0
 	c.test = pairedTest{batch: cancTestBatch}
 }
@@ -250,7 +269,7 @@ func (c *Canceller) Process(ref, mic, out, echo []float32) {
 		}
 	}
 
-	c.arbitrate(micPow, fgPow, bgPow)
+	c.arbitrate(mic, micPow, fgPow, bgPow)
 	c.adapt(mic)
 	c.pos += b
 }
@@ -275,7 +294,7 @@ func (c *Canceller) estimate(p *path) {
 // them: background over foreground when it is consistently better, foreground
 // over background when it is clearly worse. A foreground that makes the output
 // persistently louder than the microphone has diverged and resets everything.
-func (c *Canceller) arbitrate(micPow, fgPow, bgPow float64) {
+func (c *Canceller) arbitrate(mic []float32, micPow, fgPow, bgPow float64) {
 	const floor = 1e-12
 	c.pMic = cancSmooth*c.pMic + (1-cancSmooth)*micPow
 	c.pFg = cancSmooth*c.pFg + (1-cancSmooth)*fgPow
@@ -291,12 +310,14 @@ func (c *Canceller) arbitrate(micPow, fgPow, bgPow float64) {
 		return
 	}
 
-	// Paired comparison. The singer is in both errors, so it cancels in the
-	// per-block difference and what is left is the real difference between
-	// the paths; a mean that is not large against its own spread is noise and
-	// must not move weights (a background path that has absorbed a bit of the
-	// singer looks better in total error but is worse at the echo).
-	active := c.trackNearEnd()
+	// Paired comparison. The singer is in both errors, but that does not make
+	// it cancel: during double talk the background absorbs part of the singer,
+	// lowers its total error and wins the test, and a copy then overwrites a
+	// good foreground with a worse one. A copy is therefore refused while
+	// near-end speech dominates the foreground error (trackNearEnd); outside
+	// it, a mean that is not large against its own spread is noise and must
+	// not move weights.
+	active := c.trackNearEnd(mic)
 	d := fgPow - bgPow
 	verdict := c.test.update(d)
 	switch {
@@ -315,28 +336,75 @@ func (c *Canceller) arbitrate(micPow, fgPow, bgPow float64) {
 	}
 }
 
-// trackNearEnd reports whether the foreground error is dominated by something
-// the reference does not explain. The error is elevated when it is above its
-// own floor; it is echo, not near-end speech, when the background path removes
-// most of it (pBg well under pFg), which only a reference-driven correction
-// can do. Entering near-end activity discards the paired test's history, so
-// batches from before the onset cannot carry a copy.
-func (c *Canceller) trackNearEnd() bool {
+// trackNearEnd reports whether the foreground error is dominated by near-end
+// speech. Two statistics, neither of which involves the background path (the
+// path a singer fools):
+//
+//   - r = pFg/pMic, the share of the microphone energy the foreground leaves.
+//     Louder music leaves r alone; a singer pushes it towards 1. It is
+//     elevated when it is well above its own slowly rising floor.
+//   - the magnitude-squared coherence between the foreground error and the
+//     foreground echo estimate, averaged over the bins that carry echo.
+//     Residual echo after the room changed is a linear function of the same
+//     reference as the estimate, so it is coherent with it; a singer is not.
+//
+// Near-end activity is an elevated r that the estimate does not explain.
+// Entering it discards the paired test's history, so batches from before the
+// onset cannot carry a copy.
+func (c *Canceller) trackNearEnd(mic []float32) bool {
+	c.trackCoherence(mic)
 	if c.warm < cancWarmBlocks {
 		c.warm++
 		return false
 	}
-	if c.floorFg == 0 || c.pFg < c.floorFg {
-		c.floorFg = c.pFg
+	r := c.pFg / (c.pMic + 1e-12)
+	if c.floorR == 0 || r < c.floorR {
+		c.floorR = r
 	} else {
-		c.floorFg *= cancFloorRise
+		c.floorR *= cancFloorRise
 	}
 	was := c.nearEnd
-	c.nearEnd = c.pFg > cancActiveRatio*c.floorFg && c.pBg > cancExplained*c.pFg
+	c.nearEnd = r > cancActiveRatio*c.floorR && c.coh < cancCohMin
 	if c.nearEnd && !was {
 		c.test.reset()
 	}
 	return c.nearEnd
+}
+
+// trackCoherence updates c.coh: the share of the foreground error power that
+// the first cancCohParts reference partitions explain, from smoothed cross and
+// auto spectra (per bin, the sum over partitions of |S_EX|^2/S_XX, capped at
+// S_EE). The estimate itself would be the obvious reference, but an
+// overlap-save frame spans far more than one block of the filter, so the
+// residual of a long tail is not a per-bin function of the estimate; it is a
+// function of the recent reference frames.
+func (c *Canceller) trackCoherence(mic []float32) {
+	const b = CancellerBlock
+	clear(c.frame[:b])
+	for i := 0; i < b; i++ {
+		c.frame[b+i] = float64(mic[i]) - c.fg.y[i]
+	}
+	c.fft.Forward(c.frame, c.ff)
+	var cohPow, errPow float64
+	for k, e := range c.ff {
+		pe := cancCohSmooth*c.see2[k] + (1-cancCohSmooth)*(real(e)*real(e)+imag(e)*imag(e))
+		c.see2[k] = pe
+		var explained float64
+		for i := 0; i < c.cohParts; i++ {
+			xv, j := c.xf[(c.head+i)%c.p][k], i*c.bins+k
+			c.sey[j] = cancCohSmooth*c.sey[j] + (1-cancCohSmooth)*e*complex(real(xv), -imag(xv))
+			c.syy[j] = cancCohSmooth*c.syy[j] + (1-cancCohSmooth)*(real(xv)*real(xv)+imag(xv)*imag(xv))
+			if cr := c.sey[j]; c.syy[j] > 0 {
+				explained += (real(cr)*real(cr) + imag(cr)*imag(cr)) / c.syy[j]
+			}
+		}
+		cohPow += math.Min(explained, pe)
+		errPow += pe
+	}
+	c.coh = 0
+	if errPow > 0 {
+		c.coh = cohPow / errPow
+	}
 }
 
 // adapt updates the background weights and their uncertainties from the
