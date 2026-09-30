@@ -2,6 +2,8 @@ package deps
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -88,5 +90,55 @@ func TestRemoveManagedDemucsIsIdempotent(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	if err := RemoveManagedDemucs(); err != nil {
 		t.Errorf("removing a non-existent environment should succeed, got: %v", err)
+	}
+}
+
+// fakePath puts executable stubs on PATH so exec.LookPath finds them, without
+// the test depending on what the host has installed.
+func fakePath(t *testing.T, names ...string) {
+	t.Helper()
+	dir := t.TempDir()
+	for _, n := range names {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir)
+}
+
+func TestMissingDenoIsReportedWithItsInstallHint(t *testing.T) {
+	fakePath(t)
+
+	st, ok := NewChecker(runnertest.New()).Check(context.Background()).Lookup("deno")
+	if !ok {
+		t.Fatal("deno should be part of the dependency report")
+	}
+	if st.OK() {
+		t.Errorf("deno = %+v, want not found on an empty PATH", st)
+	}
+	if st.Hint != "brew install deno" {
+		t.Errorf("hint = %q, want the brew install hint", st.Hint)
+	}
+}
+
+func TestPresentDenoReportsItsVersion(t *testing.T) {
+	fakePath(t, "deno")
+	f := runnertest.New()
+	f.Handle("deno", nil, runnertest.Response{Stdout: "deno 2.5.1 (stable, release, aarch64-apple-darwin)\nv8 14.0\ntypescript 5.9\n"})
+
+	st, _ := NewChecker(f).Check(context.Background()).Lookup("deno")
+	if !st.OK() || st.Version != "2.5.1" {
+		t.Errorf("deno = %+v, want found with version 2.5.1", st)
+	}
+}
+
+// yt-dlp only needs deno for YouTube, and dtx also works from local files, so
+// a machine without deno must not lose dtx.
+func TestMissingDenoDoesNotBlockDtx(t *testing.T) {
+	fakePath(t)
+
+	report := NewChecker(runnertest.New()).Check(context.Background())
+	if st, _ := report.Lookup("deno"); st.Required {
+		t.Error("deno must be optional in the dtx report")
 	}
 }
