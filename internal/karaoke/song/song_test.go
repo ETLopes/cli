@@ -240,13 +240,13 @@ func TestSongPathsAreResolvedAgainstItsDirectory(t *testing.T) {
 	}
 }
 
-func TestSongLyricsReadsAndParsesTheSavedFile(t *testing.T) {
+func TestSongLoadLyricsReadsAndParsesTheSavedFile(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "lyrics.lrc"), []byte("[00:01.00]la la la\n[00:03.00]line two"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	s := Song{Dir: dir, Manifest: sampleManifest()}
-	l, ok, err := s.Lyrics()
+	l, ok, err := s.LoadLyrics()
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
@@ -255,10 +255,10 @@ func TestSongLyricsReadsAndParsesTheSavedFile(t *testing.T) {
 	}
 }
 
-func TestSongLyricsReportsNoneWhenTheSongHasNoSyncedLyrics(t *testing.T) {
+func TestSongLoadLyricsReportsNoneWhenTheSongHasNoSyncedLyrics(t *testing.T) {
 	m := sampleManifest()
 	m.Lyrics = LyricsNone
-	if _, ok, err := (Song{Dir: t.TempDir(), Manifest: m}).Lyrics(); ok || err != nil {
+	if _, ok, err := (Song{Dir: t.TempDir(), Manifest: m}).LoadLyrics(); ok || err != nil {
 		t.Errorf("ok=%v err=%v, want a clean none", ok, err)
 	}
 }
