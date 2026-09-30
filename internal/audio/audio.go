@@ -313,3 +313,67 @@ func copyFile(src, dst string) error {
 	}
 	return out.Close()
 }
+
+// SampleFormat is the sample encoding of a rendered WAV.
+type SampleFormat string
+
+const (
+	// SampleInt16 is 16-bit signed PCM.
+	SampleInt16 SampleFormat = "s16"
+	// SampleFloat32 is 32-bit IEEE float, which leaves a live mix headroom that
+	// 16-bit would clip.
+	SampleFloat32 SampleFormat = "f32"
+)
+
+// codec is the ffmpeg encoder for the format, or "" for an unknown one.
+func (f SampleFormat) codec() string {
+	switch f {
+	case SampleInt16:
+		return "pcm_s16le"
+	case SampleFloat32:
+		return "pcm_f32le"
+	}
+	return ""
+}
+
+// WAVSpec describes an arbitrary WAV rendering. It exists beside the DTX
+// renderers, which are fixed to the module's format, for callers -- karaoke --
+// that need other rates and sample formats.
+type WAVSpec struct {
+	SampleRate int
+	Channels   int
+	Format     SampleFormat
+}
+
+// RenderWAV converts src into a WAV of the given shape at dst. Output goes to a
+// ".part" sibling that is renamed on success, so dst either holds a complete
+// render or does not exist: callers that resume by checking for artifacts can
+// then trust what they find.
+func (c *Converter) RenderWAV(ctx context.Context, src, dst string, spec WAVSpec, total time.Duration, onProgress ProgressFunc) error {
+	codec := spec.Format.codec()
+	if codec == "" || spec.SampleRate <= 0 || spec.Channels <= 0 {
+		return fmt.Errorf("rendering %s: invalid WAV spec %+v", filepath.Base(dst), spec)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("creating output directory: %w", err)
+	}
+
+	part := dst + ".part"
+	args := baseArgs()
+	args = append(args, "-progress", "pipe:1", "-i", src, "-vn", "-map_metadata", "-1",
+		"-ar", strconv.Itoa(spec.SampleRate),
+		"-ac", strconv.Itoa(spec.Channels),
+		"-c:a", codec,
+		"-f", dtxspec.Container,
+		part)
+
+	if err := c.runFFmpeg(ctx, args, total, onProgress, "rendering "+filepath.Base(dst)); err != nil {
+		os.Remove(part)
+		return err
+	}
+	if err := os.Rename(part, dst); err != nil {
+		os.Remove(part)
+		return fmt.Errorf("rendering %s: %w", filepath.Base(dst), err)
+	}
+	return nil
+}
