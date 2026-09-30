@@ -153,4 +153,12 @@ var pt = map[string]string{
 	"kind.keys":   "Teclado",
 	"kind.drums":  "Bateria",
 	"kind.line":   "Linha",
+
+	// Karaoke song preparation stages, shown while a queued song is prepared.
+	"karaoke.stage.inspect": "Lendo informações do vídeo",
+	"karaoke.stage.download": "Baixando o áudio",
+	"karaoke.stage.separate": "Isolando a voz",
+	"karaoke.stage.render": "Preparando a base instrumental",
+	"karaoke.stage.reference": "Traçando a melodia original",
+	"karaoke.stage.lyrics": "Buscando a letra",
 }
