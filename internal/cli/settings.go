@@ -97,6 +97,31 @@ func settingGroups() []group {
 			},
 		},
 		{
+			Title: i18n.T("set.group.karaoke"),
+			Settings: []setting{
+				{Key: config.KeyKaraokeDevice, Label: i18n.T("set.k_device"), Kind: kindText,
+					Help: i18n.T("set.k_device.help")},
+				{Key: config.KeyKaraokeOutputs, Label: i18n.T("set.k_outputs"), Kind: kindList,
+					Help: i18n.T("set.k_outputs.help")},
+				{Key: config.KeyKaraokeDifficulty, Label: i18n.T("set.k_difficulty"), Kind: kindChoice,
+					Choices: []choice{
+						{Value: "easy", Label: i18n.T("set.k_difficulty.easy")},
+						{Value: "medium", Label: i18n.T("set.k_difficulty.medium")},
+						{Value: "hard", Label: i18n.T("set.k_difficulty.hard")},
+					}, Help: i18n.T("set.k_difficulty.help")},
+				{Key: config.KeyKaraokeSlackMS, Label: i18n.T("set.k_slack"), Kind: kindNumber,
+					Help: i18n.T("set.k_slack.help")},
+				{Key: config.KeyKaraokeSongsDir, Label: i18n.T("set.k_songs_dir"), Kind: kindText,
+					Help: i18n.T("set.k_songs_dir.help")},
+				{Key: config.KeyKaraokeExportDir, Label: i18n.T("set.k_export_dir"), Kind: kindText,
+					Help: i18n.T("set.k_export_dir.help")},
+				{Key: config.KeyKaraokeRecordDir, Label: i18n.T("set.k_record_dir"), Kind: kindText,
+					Help: i18n.T("set.k_record_dir.help")},
+				{Key: config.KeyKaraokePausePrep, Label: i18n.T("set.k_pause_prep"), Kind: kindToggle,
+					Help: i18n.T("set.k_pause_prep.help")},
+			},
+		},
+		{
 			Title: i18n.T("set.group.dtx"),
 			Settings: []setting{
 				{Key: config.KeyModel, Label: i18n.T("set.model"), Kind: kindChoice,
@@ -202,7 +227,7 @@ func (s setting) validate(value string) error {
 			return fmt.Errorf("%s: %s", s.Label, i18n.T("set.err.number"))
 		}
 	}
-	if s.Kind == kindList {
+	if s.Kind == kindList && s.Key == config.KeyFormats {
 		for _, part := range strings.Split(value, ",") {
 			part = strings.TrimSpace(part)
 			if part == "" {

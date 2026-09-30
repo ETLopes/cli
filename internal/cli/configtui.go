@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,6 +73,9 @@ func currentSetting(e *env, key string) string {
 	switch key {
 	case config.KeyFormats:
 		return strings.Join(e.v.GetStringSlice(key), ",")
+	case config.KeyKaraokeOutputs:
+		// Unset means the studio's main pair, which is what is in force.
+		return strings.Join(strings.Fields(strings.Trim(fmt.Sprint(e.karaoke.Outputs), "[]")), ",")
 	case config.KeyLang:
 		// Read from the language actually in force: this key is shadowed by
 		// its own environment binding, so asking viper returns empty.

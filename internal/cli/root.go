@@ -31,6 +31,8 @@ type env struct {
 	v       *viper.Viper
 	cfg     config.Config
 	studio  config.Studio
+	// karaoke is resolved against the studio's rig, so it is loaded after it.
+	karaoke config.Karaoke
 	verbose bool
 	// plain disables the live terminal view, either because the user asked or
 	// because stdout is not a terminal.
@@ -271,6 +273,7 @@ func newRootCmd(e *env) *cobra.Command {
 func (e *env) setup(cmd *cobra.Command, cfgFile string) error {
 	config.Bind(e.v)
 	config.BindStudio(e.v)
+	config.BindKaraoke(e.v)
 	if cfgFile != "" {
 		e.v.SetConfigFile(cfgFile)
 	}
@@ -301,6 +304,12 @@ func (e *env) setup(cmd *cobra.Command, cfgFile string) error {
 	if err := studio.Use(topology); err != nil {
 		return err
 	}
+
+	karaokeCfg, err := config.LoadKaraoke(e.v, topology)
+	if err != nil {
+		return err
+	}
+	e.karaoke = karaokeCfg
 
 	level := slog.LevelWarn
 	if e.verbose {
