@@ -292,6 +292,48 @@ func TestCancellerKeepsCancellingAndPreservesTheSingerDuringDoubleTalkAfterConve
 	testDoubleTalk(t, false)
 }
 
+// A singer can enter at any moment, not only when the filter happens to be
+// quiet. Whenever it does, the seeded foreground must keep its cancellation:
+// the background absorbs part of the singer during double talk, and a copy of
+// it over the foreground on that evidence is what used to break this.
+func TestCancellerKeepsCancellingWheneverTheSingerEnters(t *testing.T) {
+	for _, onset := range []float64{0.5, 1, 2, 3, 4, 5, 6, 8} {
+		cfg := mainScenario(onset + 6)
+		cfg.singer, cfg.singerAt = 0.1, onset
+		s := buildScenario(cfg)
+		c := newTestCanceller(t)
+		s.seed(c)
+		// fg.w only changes when the background is copied over it.
+		fgKey := func() [3]complex128 { return [3]complex128{c.fg.w[0][3], c.fg.w[0][40], c.fg.w[1][17]} }
+		last := fgKey()
+		var copies []float64
+		out, _ := runCanceller(t, c, s.ref, s.mic, func(i int) {
+			if k := fgKey(); k != last {
+				last = k
+				if float64(i)/cancRate >= onset {
+					copies = append(copies, float64(i)/cancRate)
+				}
+			}
+		})
+		during := s.erle(out, onset+0.5, onset+6)
+		gain := s.singerGainDB(out, onset+0.5, onset+6)
+		hit := s.pitchHitRate(t, out, onset+0.5, onset+6)
+		t.Logf("onset %.1f s: ERLE %.1f dB, singer gain %.2f dB, pitch hits %.0f%%, foreground copies at %v", onset, during, gain, 100*hit, copies)
+		if during < 15 {
+			t.Errorf("onset %.1f s: ERLE during singing %.1f dB, want at least 15", onset, during)
+		}
+		if math.Abs(gain) > 1 {
+			t.Errorf("onset %.1f s: singer level changed by %.2f dB, want within 1", onset, gain)
+		}
+		if hit < 0.9 {
+			t.Errorf("onset %.1f s: pitch tracked in %.0f%% of voiced frames, want at least 90%%", onset, 100*hit)
+		}
+		if len(copies) > 0 {
+			t.Errorf("onset %.1f s: foreground overwritten %d times during singing, at %v", onset, len(copies), copies)
+		}
+	}
+}
+
 // The filter starts seeded (the production path) and the room then changes.
 func TestCancellerRecoversFromAnEchoPathChange(t *testing.T) {
 	const swapAt = 3.0
