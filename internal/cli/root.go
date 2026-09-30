@@ -28,9 +28,9 @@ var version = "dev"
 
 // env carries the shared state every command needs.
 type env struct {
-	v       *viper.Viper
-	cfg     config.Config
-	studio  config.Studio
+	v      *viper.Viper
+	cfg    config.Config
+	studio config.Studio
 	// karaoke is resolved against the studio's rig, so it is loaded after it.
 	karaoke config.Karaoke
 	verbose bool
@@ -264,7 +264,7 @@ func newRootCmd(e *env) *cobra.Command {
 	pf.BoolVar(&e.plain, "plain", false, "disable the live progress view")
 	pf.BoolVarP(&e.assumeYes, "yes", "y", false, "assume yes for prompts; never prompt interactively")
 
-	cmd.AddCommand(newDTXCmd(e), newStudioCmd(e), newConfigCmd(e), newVersionCmd())
+	cmd.AddCommand(newDTXCmd(e), newStudioCmd(e), newKaraokeCmd(e), newConfigCmd(e), newVersionCmd())
 	return cmd
 }
 

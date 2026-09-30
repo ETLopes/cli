@@ -197,4 +197,15 @@ var en = map[string]string{
 	"karaoke.err.not_ready":  "\"%s\" is not prepared yet",
 	"karaoke.stale.age":      "the calibration is %d days old",
 	"karaoke.stale.inputs":   "a configured microphone was never calibrated",
+
+	"cmd.karaoke.short":         "Sing along to any YouTube song and get scored on your pitch",
+	"cmd.karaoke.long":          "Queues YouTube songs, prepares each one (backing track, melody and synced lyrics), and scores every singer's pitch live against the original melody.\n\nWithout a terminal, or with --plain, the URLs are queued and prepared in the foreground, one line per stage.",
+	"tool.karaoke.short":        "Sing along to any song and get scored on your pitch",
+	"karaoke.plain.queue_reset": "the saved queue could not be read and was moved to %s",
+	"karaoke.plain.duplicate":   "already in the queue: %s (%s)",
+	"karaoke.plain.queued":      "queued %s",
+	"karaoke.plain.nothing":     "nothing to prepare",
+	"karaoke.plain.ready":       "ready: %s",
+	"karaoke.plain.failed":      "failed: %s: %s",
+	"karaoke.plain.failed_n":    "%d song(s) failed to prepare",
 }

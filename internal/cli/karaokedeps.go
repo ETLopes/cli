@@ -55,6 +55,8 @@ type karaokeApp struct {
 	version   string
 	// demucsPath is the resolved Demucs executable, set once the tools exist.
 	demucsPath string
+	// python overrides the managed environment's interpreter for swift-f0.
+	python string
 
 	// pump nil sleeps, which is right for a real device; a test steps the fake
 	// stream instead.
@@ -102,7 +104,7 @@ func (a *karaokeApp) Preparer() *song.Preparer {
 		YouTube:   yt,
 		Separator: sep,
 		Audio:     audio.New(a.run),
-		Reference: &reference.SwiftF0{Run: a.run},
+		Reference: &reference.SwiftF0{Run: a.run, Python: a.python},
 		Lyrics:    &lyrics.Client{BaseURL: a.lyricsURL, Version: a.version},
 		Model:     a.dtx.Model,
 		Device:    a.dtx.Device,

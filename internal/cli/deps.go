@@ -25,9 +25,19 @@ type toolset struct {
 // this program can manage. It returns an error only when the run genuinely
 // cannot proceed.
 func ensureTools(ctx context.Context, e *env) (*toolset, error) {
+	return ensureToolsWith(ctx, e, (*deps.Checker).Check)
+}
+
+// ensureKaraokeTools is ensureTools for the karaoke tool, which also needs
+// swift-f0 and deno.
+func ensureKaraokeTools(ctx context.Context, e *env) (*toolset, error) {
+	return ensureToolsWith(ctx, e, (*deps.Checker).CheckKaraoke)
+}
+
+func ensureToolsWith(ctx context.Context, e *env, check func(*deps.Checker, context.Context) deps.Report) (*toolset, error) {
 	r := runner.New()
 	checker := deps.NewChecker(r)
-	report := checker.Check(ctx)
+	report := check(checker, ctx)
 
 	missing := report.Missing()
 	if len(missing) == 0 {
@@ -63,7 +73,7 @@ func ensureTools(ctx context.Context, e *env) (*toolset, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &toolset{report: checker.Check(ctx), demucsPath: path}, nil
+	return &toolset{report: check(checker, ctx), demucsPath: path}, nil
 }
 
 // installDemucs provisions the managed Demucs environment, confirming first
