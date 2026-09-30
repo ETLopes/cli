@@ -10,6 +10,7 @@ subcommand and works interactively when run without arguments.
 | Tool | What it does |
 |---|---|
 | `cli dtx` | Turn any video into practice tracks a Yamaha DTX-PRO drum module will play |
+| `cli karaoke` | Sing along to any YouTube song and get scored on your pitch |
 | `cli studio` | Drive a REAPER home studio: cue mixes, effects and monitoring |
 
 ## Install
@@ -236,6 +237,126 @@ Minus-one mixes are summed with ffmpeg's `amix` using `normalize=0`. That matter
 several dB quieter than the source. Demucs stems sum back to the original
 recording, so a straight sum is the faithful result. Reach for `--limit` if a
 particular track clips.
+
+---
+
+# cli karaoke
+
+Sing along to any YouTube song and get scored on your pitch. Give it URLs and
+it prepares each song in the background: the audio is downloaded, the vocals are
+removed with [Demucs](https://github.com/adefossez/demucs) to leave a backing
+track, the original melody is traced, and synced lyrics are fetched from
+[LRCLIB](https://lrclib.net). Then every microphone you configure is scored live
+against the original melody, one player per microphone.
+
+```
+$ cli karaoke
+
+  cli  karaoke
+  Calibration ok, measured 3 h ago
+  Device: Studio Interface   Players: Ana (1), Bruno (2)
+
+  > Paste a YouTube URL and press Enter
+
+  ▸ ★ Placeholder Song One       Ana 8123 · Bruno 6400
+    ● Placeholder Song Two
+    ⠸ Placeholder Song Three     Isolating the vocals █████····· 50%
+```
+
+## First run
+
+```sh
+cli karaoke doctor            # tools, audio devices, calibration
+cli karaoke doctor --install  # set up the tools karaoke can manage
+cli karaoke doctor --mic      # listen for a second and report each mic's level
+cli karaoke calibrate         # measure the echo from the speakers to the mics
+```
+
+1. **Microphone permission.** macOS withholds the microphone from a terminal
+   app until you allow it: System Settings, Privacy & Security, Microphone, and
+   switch on the terminal you run `cli` from. `doctor --mic` says when every
+   input is digitally silent, which is the sign it has not been allowed.
+2. **Calibrate once per setup.** The sweep plays through the speakers for about
+   twelve seconds and each microphone hears its own echo of it. Karaoke measures
+   that echo and subtracts the backing track from what the microphones hear, so
+   only the singer is scored. It is repeated when the device, sample rate or
+   output pair changes, and after 30 days.
+3. **Set it up for a clean measurement.** Point the speakers away from the
+   microphones, use dynamic cardioid microphones (they pick up little of the
+   room), keep the room quiet, and set the input gain so the peaks stay well
+   below clipping. A clipped sweep is refused with advice to lower the gain.
+
+## The queue
+
+Running `cli karaoke` opens the queue. Paste one or several URLs into the input
+and they are prepared one at a time while you sing.
+
+| Key | |
+|---|---|
+| `↑` `↓` | select a song |
+| `shift+↑` `shift+↓` or `K` `J` | move the song in the queue |
+| `enter` | sing the selected song (in the input: add the URL) |
+| `tab` | switch between the input and the queue |
+| `d` or `delete` | remove the song (asks first while it is being prepared) |
+| `r` | try a failed song again |
+| `c` | calibrate |
+| `e` | export the song for UltraStar Deluxe |
+| `?` | help |
+| `q` or `ctrl+c` | quit; the queue is saved as you go |
+
+While singing, `space` pauses and `esc` stops early. Each player has a pitch
+lane: a band for the original pitch and a marker for yours, green on a hit and
+red on a miss, folded by octaves so a singer an octave away still counts. When
+the song ends, the results show each player's score, how much of the singing was
+in tune, the mean error in cents, whether they drift sharp or flat, their
+longest streak and their best and worst lines. The score is kept on the song.
+
+Without a terminal, or with `--plain`, the URLs are queued and prepared in the
+foreground, one line per stage.
+
+## Players and difficulty
+
+Each configured input is a player, named on screen. `difficulty` is `easy`,
+`medium` or `hard`, and `slack_ms` is how far off in time a note may be.
+
+```yaml
+# ~/.config/cli/config.yaml
+karaoke:
+  device: Studio Interface        # empty: the system default
+  outputs: [1, 2]                 # the pair that carries the backing track
+  inputs:
+    - {channel: 1, name: Ana}
+    - {channel: 2, name: Bruno}
+  difficulty: medium
+  slack_ms: 100
+  songs_dir: ~/Music/karaoke
+  export_dir: ~/Music/karaoke/UltraStar
+  record_dir: ""                  # set to keep a replayable recording of each session
+  pause_prep_while_singing: true  # give the CPU to the audio while a song plays
+```
+
+## Export to UltraStar Deluxe
+
+```sh
+cli karaoke export <id-or-url-or-song-dir> --out ~/Music/UltraStar
+```
+
+or press `e` in the queue. It writes an UltraStar Deluxe 1.1.0 folder with the
+chart, the audio, the instrumental and the vocals.
+
+## Limits
+
+- **Live audio is macOS-only for now.** On other systems the queue, the
+  preparation and the export work, and singing and calibrating say so.
+- **The backing plays in mono** on the configured output pair.
+- **Lyrics come from LRCLIB and stay local.** They are stored in the song's
+  folder and never uploaded. A song without synced lyrics can still be sung.
+
+## A note on YouTube
+
+Downloading from YouTube may go against its Terms of Service, and songs are
+copyrighted. Use `cli karaoke` for material you are entitled to use, for your own
+practice at home. Nothing is uploaded or shared.
 
 ---
 
