@@ -248,4 +248,18 @@ var pt = map[string]string{
 	"karaoke.cal.input":           "entrada %d: atraso de %.1f ms, cauda de %.0f ms, redução de eco de %.1f dB, ruído residual de %.1f dBFS",
 	"karaoke.cal.saved":           "calibração salva para %s a %d Hz",
 	"karaoke.cal.clipping":        "um microfone saturou durante o sweep, então a medição estaria errada; diminua o ganho de entrada na interface (ou o volume das caixas) e rode 'cli karaoke calibrate' de novo",
+
+	"cmd.karaoke.export.short":      "Exporta uma música preparada como uma pasta do UltraStar Deluxe",
+	"cmd.karaoke.export.long":       "Grava uma cartela UltraStar Deluxe 1.1.0 com o áudio, o instrumental e a voz da música. Indique uma entrada da fila pelo ID, uma música pela URL ou uma pasta de música.",
+	"cmd.karaoke.replay.short":      "Reproduz uma sessão gravada pelo mesmo processamento ao vivo",
+	"karaoke.export.flag.out":       "pasta onde gravar a música UltraStar (padrão: a pasta de exportação configurada)",
+	"karaoke.export.done":           "exportada",
+	"karaoke.export.folder":         "Pasta",
+	"karaoke.export.chart":          "Cartela",
+	"karaoke.export.unknown":        "%q não é uma música da fila, uma URL conhecida nem uma pasta de música preparada",
+	"karaoke.replay.no_calibration": "não há calibração salva para %s a %d Hz no par de saídas gravado",
+	"karaoke.replay.scores":         "Pontuações",
+	"karaoke.replay.player":         "%s (entrada %d): %d pontos, %.0f%% afinado",
+	"karaoke.replay.metrics":        "Métricas por microfone",
+	"karaoke.replay.mic":            "%s (entrada %d): %.0f%% com voz, redução de eco de %.1f dB, entrada média de %.1f dBFS",
 }

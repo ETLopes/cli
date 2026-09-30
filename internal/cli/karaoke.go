@@ -48,7 +48,8 @@ func newKaraokeCmd(e *env) *cobra.Command {
 			return runKaraokeTUI(cmd.Context(), app, urls)
 		},
 	}
-	cmd.AddCommand(newKaraokeDoctorCmd(e), newKaraokeCalibrateCmd(e))
+	cmd.AddCommand(newKaraokeDoctorCmd(e), newKaraokeCalibrateCmd(e),
+		newKaraokeExportCmd(e), newKaraokeReplayCmd(e))
 	return cmd
 }
 
