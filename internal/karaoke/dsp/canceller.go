@@ -37,6 +37,10 @@ const (
 	cancSeedP       = 1e-3  // weight uncertainty of a seeded filter, as a fraction of the weight power
 	cancRegAbs      = 1e-10 // floor of the innovation variance
 	cancDivergeBlk  = 60    // blocks of output louder than 2x mic before a reset
+	cancWarmBlocks  = 80    // blocks before the smoothed error powers are trusted
+	cancActiveRatio = 50.0 // foreground error this far above its floor may be near-end speech
+	cancExplained   = 0.5   // background error below this share of the foreground's means the reference explains it
+	cancFloorRise   = 1.002 // per-block rise of the foreground error floor
 )
 
 // path is one adaptive filter: P partitions of frequency-domain weights plus
@@ -106,6 +110,9 @@ type Canceller struct {
 	pFg, pBg float64   // smoothed error powers of the two paths
 	pMic     float64
 	test     pairedTest // background against foreground
+	floorFg  float64    // slowly rising minimum of pFg
+	warm     int        // blocks seen, up to cancWarmBlocks
+	nearEnd  bool       // the foreground error rose and the reference does not explain it
 	louder   int
 }
 
@@ -165,6 +172,7 @@ func (c *Canceller) Reset() {
 	clear(c.see)
 	clear(c.psi)
 	c.pFg, c.pBg, c.pMic = 0, 0, 0
+	c.floorFg, c.warm, c.nearEnd = 0, 0, false
 	c.louder = 0
 	c.test = pairedTest{batch: cancTestBatch}
 }
@@ -288,10 +296,11 @@ func (c *Canceller) arbitrate(micPow, fgPow, bgPow float64) {
 	// the paths; a mean that is not large against its own spread is noise and
 	// must not move weights (a background path that has absorbed a bit of the
 	// singer looks better in total error but is worse at the echo).
+	active := c.trackNearEnd()
 	d := fgPow - bgPow
 	verdict := c.test.update(d)
 	switch {
-	case verdict > 0:
+	case verdict > 0 && !active:
 		for i := range c.fg.w {
 			copy(c.fg.w[i], c.bg.w[i])
 		}
@@ -304,6 +313,30 @@ func (c *Canceller) arbitrate(micPow, fgPow, bgPow float64) {
 		c.pBg = c.pFg
 		c.test.reset()
 	}
+}
+
+// trackNearEnd reports whether the foreground error is dominated by something
+// the reference does not explain. The error is elevated when it is above its
+// own floor; it is echo, not near-end speech, when the background path removes
+// most of it (pBg well under pFg), which only a reference-driven correction
+// can do. Entering near-end activity discards the paired test's history, so
+// batches from before the onset cannot carry a copy.
+func (c *Canceller) trackNearEnd() bool {
+	if c.warm < cancWarmBlocks {
+		c.warm++
+		return false
+	}
+	if c.floorFg == 0 || c.pFg < c.floorFg {
+		c.floorFg = c.pFg
+	} else {
+		c.floorFg *= cancFloorRise
+	}
+	was := c.nearEnd
+	c.nearEnd = c.pFg > cancActiveRatio*c.floorFg && c.pBg > cancExplained*c.pFg
+	if c.nearEnd && !was {
+		c.test.reset()
+	}
+	return c.nearEnd
 }
 
 // adapt updates the background weights and their uncertainties from the
