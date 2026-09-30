@@ -6,24 +6,44 @@ project_name: cli
 
 before:
   hooks:
+    # The macOS binaries link CoreAudio through cgo, which only a Mac can
+    # build: fail before anything is compiled rather than after half the
+    # archives exist.
+    - sh -c 'test "$(uname -s)" = Darwin || { echo "releases must be cut on macOS (the darwin build links CoreAudio)"; exit 1; }'
     - go mod tidy
     - go test ./...
 
 builds:
-  - id: cli
+  # cli karaoke drives the audio interface directly, through miniaudio and
+  # CoreAudio, so the macOS build links C. Apple's clang builds both
+  # architectures natively on either kind of Mac.
+  - id: cli-darwin
     main: .
     binary: cli
     env:
-      # The toolbox shells out to ffmpeg, yt-dlp and Demucs rather than
-      # linking any C, so a static binary keeps the archives portable across
-      # distributions.
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
     flags:
       - -trimpath
     ldflags:
       - -s -w -X github.com/ETLopes/cli/internal/cli.version={{ .Version }}
     goos:
       - darwin
+    goarch:
+      - amd64
+      - arm64
+  # Everywhere else live karaoke audio is not supported yet, and the rest of
+  # the toolbox shells out to ffmpeg, yt-dlp and Demucs rather than linking any
+  # C, so a static binary keeps the archives portable across distributions.
+  - id: cli
+    main: .
+    binary: cli
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/ETLopes/cli/internal/cli.version={{ .Version }}
+    goos:
       - linux
       - windows
     goarch:
@@ -79,3 +99,8 @@ release:
 
     `cli dtx` additionally needs `ffmpeg`, `ffprobe` and `yt-dlp` on your PATH;
     run `cli dtx doctor --install` to set up Demucs.
+
+    `cli karaoke` also needs `deno` (yt-dlp uses it for YouTube) and `uv`.
+    Singing is macOS-only for now: the first run asks for microphone access
+    for your terminal app. On Linux and Windows the queue, preparation and
+    UltraStar export work, but live audio does not yet.

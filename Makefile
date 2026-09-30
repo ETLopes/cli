@@ -22,13 +22,23 @@ cover: ## Write and open an HTML coverage report
 	go test -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out
 
+.PHONY: build-nocgo
+build-nocgo: ## Build without cgo (no live karaoke audio), as Linux and Windows ship
+	@mkdir -p bin
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY)-nocgo .
+
 .PHONY: lint
-lint: ## Vet and check formatting
+lint: ## Vet, check formatting, and compile the builds without live audio
 	go vet ./...
 	@unformatted=$$(gofmt -l .); \
 	if [ -n "$$unformatted" ]; then \
 		echo "not gofmt'd:"; echo "$$unformatted"; exit 1; \
 	fi
+	@# The audio stub only compiles when cgo is off or the OS is not macOS,
+	@# which a Mac never builds by default; build those variants so it cannot rot.
+	CGO_ENABLED=0 go build ./...
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build ./...
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./...
 	@echo "lint clean"
 
 .PHONY: tidy
