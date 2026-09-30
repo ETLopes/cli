@@ -191,4 +191,10 @@ var en = map[string]string{
 	"set.k_record_dir.help":   "Record every session here so it can be replayed while tuning. Leave unset to record nothing.",
 	"set.k_pause_prep":        "Pause preparation while singing",
 	"set.k_pause_prep.help":   "Stops starting new songs while one is sung, so the CPU belongs to the audio.",
+
+	"karaoke.err.no_device":  "no audio device named %q; run 'cli karaoke doctor' to list the devices",
+	"karaoke.err.no_devices": "no audio devices were found",
+	"karaoke.err.not_ready":  "\"%s\" is not prepared yet",
+	"karaoke.stale.age":      "the calibration is %d days old",
+	"karaoke.stale.inputs":   "a configured microphone was never calibrated",
 }
