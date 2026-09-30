@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -106,6 +107,11 @@ func installDemucs(ctx context.Context, e *env, checker *deps.Checker) (string, 
 	}
 
 	path, err := checker.InstallDemucs(ctx, onLine)
+	if errors.Is(err, deps.ErrSwiftF0) && path != "" {
+		// swift-f0 is only for karaoke; demucs works, so dtx must not fail.
+		ui.Println(ui.Muted.Render(ui.GlyphBullet + " " + err.Error()))
+		err = nil
+	}
 	if err != nil {
 		return "", err
 	}
