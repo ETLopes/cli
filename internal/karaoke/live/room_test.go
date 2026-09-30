@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -369,11 +370,23 @@ func knownCalibration(t testing.TB, rate int, rooms ...*roomSpec) calibrate.Resu
 			in.IR[k] = float32(truth[in.BulkDelay+k])
 		}
 		in.TailMs = 350
-		in.ResidualFloorDBFS = 20 * math.Log10(residualFloor(t, in, truth))
+		floorMu.Lock()
+		floor, ok := floors[*r]
+		if !ok { // measuring takes seconds under -race, and rooms repeat
+			floor = residualFloor(t, in, truth)
+			floors[*r] = floor
+		}
+		floorMu.Unlock()
+		in.ResidualFloorDBFS = 20 * math.Log10(floor)
 		res.Inputs = append(res.Inputs, in)
 	}
 	return res
 }
+
+var (
+	floorMu sync.Mutex
+	floors  = map[roomSpec]float64{}
+)
 
 // residualFloor runs a seeded chain over the backing alone at 16 kHz and
 // returns the largest cleaned level once it has settled.
