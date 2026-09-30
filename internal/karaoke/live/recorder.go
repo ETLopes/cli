@@ -118,9 +118,11 @@ func (r *recorder) write(ref []float32, mics [][]float32) {
 	}
 }
 
-func (r *recorder) gap(at, n int64) {
+// gap notes that n frames were lost after the samples recorded so far. At is
+// an index into the recorded WAVs, which lack the lost frames.
+func (r *recorder) gap(n int64) {
 	if r != nil {
-		r.gaps = append(r.gaps, gap{At: at, Frames: n})
+		r.gaps = append(r.gaps, gap{At: r.ref.samples, Frames: n})
 	}
 }
 
@@ -142,7 +144,7 @@ func (r *recorder) finish(b Bundle) {
 	if r == nil || r.failure() != nil {
 		return
 	}
-	b.Version, b.Gaps = bundleVersion, r.gaps
+	b.Version, b.Gaps, b.Frames = bundleVersion, r.gaps, r.ref.samples
 	for _, w := range append([]*wavWriter{r.ref}, r.caps...) {
 		if err := w.close(); err != nil {
 			r.abort(err)
@@ -170,7 +172,7 @@ func (s *Session) bundle(incomplete bool) Bundle {
 		SongDir: s.cfg.Song.Dir, Calibration: key, SampleRate: s.rate,
 		Inputs: s.cfg.Stream.Inputs, Players: s.cfg.Players,
 		Difficulty: s.cfg.Difficulty.String(), SlackMS: slack,
-		Segments: s.tl.segments(), Frames: s.consumed, Incomplete: incomplete,
+		Segments: s.tl.segments(), Incomplete: incomplete,
 	}
 }
 
