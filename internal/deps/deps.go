@@ -256,6 +256,11 @@ func dataDir() string {
 // VenvDir is the location of the managed Python environment.
 func VenvDir() string { return filepath.Join(dataDir(), "demucs-venv") }
 
+// VenvPython is the interpreter inside the managed environment, where swift-f0
+// is installed. It is a path only: whether it exists is for the caller to find
+// out by running it.
+func VenvPython() string { return venvBin("python") }
+
 // ManagedDemucsPath returns the path to the managed Demucs executable, or an
 // empty string when it has not been installed.
 func ManagedDemucsPath() string {

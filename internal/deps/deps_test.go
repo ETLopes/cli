@@ -341,3 +341,11 @@ func TestMissingDenoDoesNotBlockDtx(t *testing.T) {
 		t.Error("deno must be optional in the dtx report")
 	}
 }
+
+func TestVenvPythonLivesInsideTheManagedEnvironment(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	got := VenvPython()
+	if !strings.HasPrefix(got, VenvDir()) || !strings.Contains(filepath.Base(got), "python") {
+		t.Errorf("VenvPython() = %q, want a python inside %q", got, VenvDir())
+	}
+}
