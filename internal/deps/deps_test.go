@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ETLopes/cli/internal/runner"
 	"github.com/ETLopes/cli/internal/runnertest"
 )
 
@@ -207,6 +208,126 @@ func TestKaraokeReportRequiresWhatKaraokeNeeds(t *testing.T) {
 	}
 	if report.Ready() {
 		t.Error("karaoke report should not be ready on an empty machine")
+	}
+}
+
+// installFake answers an install the way a healthy machine would: uv builds the
+// venv, "installing" demucs drops its executable and an interpreter into it,
+// and the verification runs succeed. failOn names a package whose install
+// should fail.
+func installFake(failOn string) *runnertest.Fake {
+	f := runnertest.New()
+	f.HandleFunc("", nil, installResponder(failOn))
+	return f
+}
+
+func installResponder(failOn string) func(runner.Spec) runnertest.Response {
+	return func(spec runner.Spec) runnertest.Response {
+		if filepath.Base(spec.Name) == "uv" && len(spec.Args) > 0 && spec.Args[0] == "pip" {
+			pkg := spec.Args[len(spec.Args)-1]
+			if pkg == failOn {
+				return runnertest.Response{Err: errors.New("no matching distribution for " + pkg)}
+			}
+			return runnertest.Response{Do: func(runner.Spec) error {
+				if pkg != "demucs" {
+					return nil
+				}
+				for _, name := range []string{"demucs", "python"} {
+					p := venvBin(name)
+					if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+						return err
+					}
+					if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
+						return err
+					}
+				}
+				return nil
+			}}
+		}
+		return runnertest.Response{}
+	}
+}
+
+func installedPackages(f *runnertest.Fake) []string {
+	var pkgs []string
+	for _, c := range f.Calls() {
+		if filepath.Base(c.Name) == "uv" && len(c.Args) > 0 && c.Args[0] == "pip" {
+			pkgs = append(pkgs, c.Args[len(c.Args)-1])
+		}
+	}
+	return pkgs
+}
+
+func TestInstallAddsSwiftF0AfterDemucsAndVerifiesBoth(t *testing.T) {
+	fakePath(t, "uv")
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	f := installFake("")
+
+	path, err := NewChecker(f).InstallDemucs(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if path != ManagedDemucsPath() {
+		t.Errorf("path = %q, want the managed demucs executable", path)
+	}
+
+	if got := strings.Join(installedPackages(f), ","); got != "demucs,numpy,swift-f0" {
+		t.Errorf("install order = %s, want demucs,numpy,swift-f0", got)
+	}
+	var demucsRuns, importChecks int
+	for _, c := range f.Calls() {
+		switch {
+		case c.Name == path && c.HasArg("--help"):
+			demucsRuns++
+		case filepath.Base(c.Name) == "python" && c.HasArg("import swift_f0"):
+			importChecks++
+		}
+	}
+	if demucsRuns != 1 || importChecks != 1 {
+		t.Errorf("demucs runs = %d, swift_f0 import checks = %d, want one of each", demucsRuns, importChecks)
+	}
+}
+
+func TestSwiftF0InstallFailureKeepsDemucsAndSaysWhichPackageFailed(t *testing.T) {
+	fakePath(t, "uv")
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	f := installFake("swift-f0")
+
+	path, err := NewChecker(f).InstallDemucs(context.Background(), nil)
+	if err == nil || !strings.Contains(err.Error(), "swift-f0") {
+		t.Fatalf("err = %v, want an error naming swift-f0", err)
+	}
+	if !errors.Is(err, ErrSwiftF0) {
+		t.Errorf("err = %v, want it to match ErrSwiftF0 so callers can tell it apart", err)
+	}
+	if path == "" || path != ManagedDemucsPath() {
+		t.Errorf("path = %q, want the working demucs path returned alongside the error", path)
+	}
+	if _, statErr := os.Stat(VenvDir()); statErr != nil {
+		t.Errorf("the venv should be left in place: %v", statErr)
+	}
+	for _, c := range f.Calls() {
+		if c.HasArg("uninstall") {
+			t.Errorf("unexpected removal call: %s", c)
+		}
+	}
+}
+
+func TestSwiftF0ImportFailureAfterInstallIsReported(t *testing.T) {
+	fakePath(t, "uv")
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	f := runnertest.New()
+	f.HandleFunc("python", []string{"import swift_f0"}, func(runner.Spec) runnertest.Response {
+		return runnertest.Response{Err: errors.New("ModuleNotFoundError")}
+	})
+	f.HandleFunc("", nil, installResponder(""))
+
+	path, err := NewChecker(f).InstallDemucs(context.Background(), nil)
+	if !errors.Is(err, ErrSwiftF0) || !strings.Contains(err.Error(), "swift_f0") {
+		t.Errorf("err = %v, want an ErrSwiftF0 mentioning the failed import", err)
+	}
+	if path == "" {
+		t.Error("the working demucs path should still be returned")
 	}
 }
 

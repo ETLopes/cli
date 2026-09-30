@@ -9,6 +9,7 @@ package deps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -275,7 +276,9 @@ func venvBin(name string) string {
 }
 
 // InstallDemucs builds the managed environment and installs Demucs into it,
-// returning the path to the resulting executable.
+// returning the path to the resulting executable. It also installs swift-f0,
+// the pitch tracker the karaoke tool uses; a failure there is reported as an
+// error matching ErrSwiftF0 with the (working) Demucs path still returned.
 //
 // onLine, when non-nil, receives installer output so a caller can show progress
 // during what is a multi-minute, multi-gigabyte download.
@@ -339,7 +342,30 @@ func (c *Checker) InstallDemucs(ctx context.Context, onLine runner.LineFunc) (st
 	if err := c.verify(ctx, path); err != nil {
 		return "", err
 	}
+
+	// swift-f0 goes in last, and only once demucs is proven to work, so that
+	// nothing here can break an install dtx depends on. If it fails, the
+	// working demucs path is returned alongside the error: dtx can carry on,
+	// and the karaoke tool can report the failure by itself.
+	if err := c.installSwiftF0(ctx, install, python); err != nil {
+		return path, err
+	}
 	return path, nil
+}
+
+// ErrSwiftF0 marks a failure to provision swift-f0. Demucs is fully installed
+// when this is returned, so callers that only need Demucs can carry on.
+var ErrSwiftF0 = errors.New("swift-f0 install failed")
+
+// installSwiftF0 installs the pitch tracker and proves it imports.
+func (c *Checker) installSwiftF0(ctx context.Context, install func(string) error, python string) error {
+	if err := install(swiftF0Package); err != nil {
+		return fmt.Errorf("installing %s (demucs is installed and unaffected): %w: %w", swiftF0Package, ErrSwiftF0, err)
+	}
+	if _, err := c.Run.Run(ctx, runner.Spec{Name: python, Args: []string{"-c", "import swift_f0"}}); err != nil {
+		return fmt.Errorf("%s installed but swift_f0 does not import: %w: %w", swiftF0Package, ErrSwiftF0, err)
+	}
+	return nil
 }
 
 // undeclaredDeps are packages demucs imports at runtime but omits from its
