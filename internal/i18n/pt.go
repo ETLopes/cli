@@ -182,4 +182,10 @@ var pt = map[string]string{
 	"set.k_record_dir.help":   "Grava cada sessão aqui para poder reproduzi-la ao ajustar. Deixe vazio para não gravar nada.",
 	"set.k_pause_prep":        "Pausar preparo ao cantar",
 	"set.k_pause_prep.help":   "Não começa músicas novas enquanto uma é cantada, para que a CPU fique com o áudio.",
+
+	"karaoke.err.no_device":  "nenhum dispositivo de áudio chamado %q; rode 'cli karaoke doctor' para listar os dispositivos",
+	"karaoke.err.no_devices": "nenhum dispositivo de áudio foi encontrado",
+	"karaoke.err.not_ready":  "\"%s\" ainda não está preparada",
+	"karaoke.stale.age":      "a calibração tem %d dias",
+	"karaoke.stale.inputs":   "um microfone configurado nunca foi calibrado",
 }
