@@ -257,4 +257,18 @@ var en = map[string]string{
 	"karaoke.cal.input":           "input %d: delay %.1f ms, tail %.0f ms, echo reduction %.1f dB, residual floor %.1f dBFS",
 	"karaoke.cal.saved":           "calibration saved for %s at %d Hz",
 	"karaoke.cal.clipping":        "a microphone clipped during the sweep, so the measurement would be wrong; lower the input gain on the interface (or the speaker volume), then run 'cli karaoke calibrate' again",
+
+	"cmd.karaoke.export.short":      "Export a prepared song as an UltraStar Deluxe folder",
+	"cmd.karaoke.export.long":       "Writes an UltraStar Deluxe 1.1.0 chart with the song's audio, instrumental and vocal files. Name a queue entry by its ID, a song by its URL, or a song directory.",
+	"cmd.karaoke.replay.short":      "Replay a recorded session through the live pipeline",
+	"karaoke.export.flag.out":       "folder to write the UltraStar song into (default: the configured export folder)",
+	"karaoke.export.done":           "exported",
+	"karaoke.export.folder":         "Folder",
+	"karaoke.export.chart":          "Chart",
+	"karaoke.export.unknown":        "%q is not a queued song, a known URL or a prepared song directory",
+	"karaoke.replay.no_calibration": "no stored calibration for %s at %d Hz on the recorded output pair",
+	"karaoke.replay.scores":         "Scores",
+	"karaoke.replay.player":         "%s (input %d): %d points, %.0f%% in tune",
+	"karaoke.replay.metrics":        "Per-microphone metrics",
+	"karaoke.replay.mic":            "%s (input %d): %.0f%% voiced, echo reduction %.1f dB, mean input %.1f dBFS",
 }

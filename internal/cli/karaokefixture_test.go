@@ -87,6 +87,10 @@ func fxSong(t testing.TB, dir string) song.Song {
 	fxMust(t, audioio.WriteWAV(f, &audioio.Audio{SampleRate: fxRate, Channels: 2, Samples: stereo}, audioio.FormatFloat32))
 	fxMust(t, f.Close())
 
+	fxMust(t, os.MkdirAll(filepath.Join(dir, "stems"), 0o755))
+	fxMust(t, os.WriteFile(filepath.Join(dir, "audio.m4a"), []byte("audio"), 0o644))
+	fxMust(t, os.WriteFile(filepath.Join(dir, "stems", "vocals.wav"), []byte("audio"), 0o644))
+
 	lrc := "[00:00.30]alpha bravo charlie\n[00:03.30]delta echo foxtrot\n"
 	fxMust(t, os.WriteFile(filepath.Join(dir, song.SyncedLyricsName), []byte(lrc), 0o644))
 	m := song.Manifest{Version: song.ManifestVersion, VideoID: "synthetic", Title: "Synthetic Placeholder",
@@ -94,6 +98,8 @@ func fxSong(t testing.TB, dir string) song.Song {
 		Stages: map[song.Stage]song.StageRecord{
 			song.StageRender:    {Artifacts: []string{song.InstrumentalName}},
 			song.StageReference: {Artifacts: []string{song.ReferenceName}},
+			song.StageDownload:  {Artifacts: []string{"audio.m4a"}},
+			song.StageSeparate:  {Artifacts: []string{"stems/vocals.wav"}},
 		}}
 	data, err := json.Marshal(m)
 	fxMust(t, err)
