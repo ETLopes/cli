@@ -99,9 +99,9 @@ func (c *Checker) Check(ctx context.Context) Report {
 	}}
 }
 
-// swiftF0Package is the PyPI name of the pitch tracker installed beside Demucs;
+// SwiftF0Package is the PyPI name of the pitch tracker installed beside Demucs;
 // its import name is swift_f0.
-const swiftF0Package = "swift-f0"
+const SwiftF0Package = "swift-f0"
 
 // CheckKaraoke reports on everything the karaoke tool needs: the dtx tools plus
 // swift-f0 and deno. Karaoke always downloads and always scores pitch, so
@@ -125,10 +125,10 @@ func (c *Checker) CheckKaraoke(ctx context.Context) Report {
 // version. Path is the interpreter, since the package has no executable.
 func (c *Checker) swiftF0Status(ctx context.Context) Status {
 	s := Status{
-		Name:     swiftF0Package,
+		Name:     SwiftF0Package,
 		Required: true,
 		Managed:  true,
-		Hint:     "run 'cli dtx doctor --install' to set it up automatically",
+		Hint:     "run 'cli karaoke doctor --install' to set it up automatically",
 	}
 	python := venvBin("python")
 	if _, err := os.Stat(python); err != nil {
@@ -136,7 +136,7 @@ func (c *Checker) swiftF0Status(ctx context.Context) Status {
 	}
 	res, err := c.Run.Run(ctx, runner.Spec{
 		Name: python,
-		Args: []string{"-c", "import importlib.metadata as m; print(m.version('" + swiftF0Package + "'))"},
+		Args: []string{"-c", "import importlib.metadata as m; print(m.version('" + SwiftF0Package + "'))"},
 	})
 	if err != nil {
 		return s
@@ -362,13 +362,43 @@ func (c *Checker) InstallDemucs(ctx context.Context, onLine runner.LineFunc) (st
 // when this is returned, so callers that only need Demucs can carry on.
 var ErrSwiftF0 = errors.New("swift-f0 install failed")
 
+// ErrNoManagedEnvironment is returned by InstallSwiftF0 when there is no
+// managed environment to add swift-f0 to; the full InstallDemucs builds one.
+var ErrNoManagedEnvironment = errors.New("no managed python environment")
+
+// InstallSwiftF0 adds swift-f0 to an existing managed environment, leaving
+// Demucs, PyTorch and the environment itself untouched.
+//
+// This is the whole job when only swift-f0 is missing -- a Demucs install that
+// predates karaoke, or a swift-f0 install that failed -- and it matters to get
+// right: InstallDemucs recreates the environment from scratch, which means
+// downloading roughly 2 GB of PyTorch again for a package of a few megabytes.
+func (c *Checker) InstallSwiftF0(ctx context.Context, onLine runner.LineFunc) error {
+	if _, err := exec.LookPath(uvTool); err != nil {
+		return fmt.Errorf("uv is required to install %s automatically; install it with 'brew install uv'", SwiftF0Package)
+	}
+	python := venvBin("python")
+	if _, err := os.Stat(python); err != nil {
+		return fmt.Errorf("installing %s: %w at %s", SwiftF0Package, ErrNoManagedEnvironment, VenvDir())
+	}
+	install := func(target string) error {
+		_, err := c.Run.Run(ctx, runner.Spec{
+			Name:   uvTool,
+			Args:   []string{"pip", "install", "--python", python, target},
+			OnLine: onLine,
+		})
+		return err
+	}
+	return c.installSwiftF0(ctx, install, python)
+}
+
 // installSwiftF0 installs the pitch tracker and proves it imports.
 func (c *Checker) installSwiftF0(ctx context.Context, install func(string) error, python string) error {
-	if err := install(swiftF0Package); err != nil {
-		return fmt.Errorf("installing %s (demucs is installed and unaffected): %w: %w", swiftF0Package, ErrSwiftF0, err)
+	if err := install(SwiftF0Package); err != nil {
+		return fmt.Errorf("installing %s (demucs is installed and unaffected): %w: %w", SwiftF0Package, ErrSwiftF0, err)
 	}
 	if _, err := c.Run.Run(ctx, runner.Spec{Name: python, Args: []string{"-c", "import swift_f0"}}); err != nil {
-		return fmt.Errorf("%s installed but swift_f0 does not import: %w: %w", swiftF0Package, ErrSwiftF0, err)
+		return fmt.Errorf("%s installed but swift_f0 does not import: %w: %w", SwiftF0Package, ErrSwiftF0, err)
 	}
 	return nil
 }
