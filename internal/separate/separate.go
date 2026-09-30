@@ -72,6 +72,22 @@ type Options struct {
 	Shifts int
 	// Jobs is the number of parallel worker processes. Zero lets Demucs decide.
 	Jobs int
+	// TwoStems, when set to a stem name such as "vocals", asks Demucs for just
+	// that stem and its complement ("vocals.wav" and "no_vocals.wav") instead
+	// of the full split. Empty keeps the model's normal multi-stem output.
+	TwoStems string
+}
+
+// outputRoot is the directory handed to Demucs as --out. Demucs writes
+// <out>/<model>/*.wav whatever the mode, and discover accepts any WAV it
+// finds, so a two-stem run must live in its own directory: otherwise a cached
+// 4-stem run would satisfy a vocals request, and the reverse. The default
+// mode keeps outDir itself, which is dtx's established layout.
+func outputRoot(outDir string, opts Options) string {
+	if opts.TwoStems == "" {
+		return outDir
+	}
+	return filepath.Join(outDir, "2stems-"+filepath.Base(opts.TwoStems))
 }
 
 // Stem is one separated instrument track.
@@ -90,12 +106,15 @@ type ProgressFunc func(fraction float64)
 // default nested per-track layout, so the results are easy to locate.
 //
 // If a previous run already produced stems in outDir they are reused, which
-// matters because separation is by far the most expensive stage.
+// matters because separation is by far the most expensive stage. Two-stem runs
+// are cached apart from full splits (see outputRoot), so the mode of the
+// request always matches the mode of the stems returned.
 func (s *Separator) Separate(ctx context.Context, src, outDir string, opts Options, onProgress ProgressFunc) ([]Stem, error) {
 	model := opts.Model
 	if model == "" {
 		model = ModelDefault
 	}
+	outDir = outputRoot(outDir, opts)
 	// Demucs always nests output one level under the model name.
 	stemDir := filepath.Join(outDir, model)
 
@@ -157,6 +176,9 @@ func (s *Separator) run(ctx context.Context, src, outDir, model, device string, 
 	}
 	if opts.Jobs > 0 {
 		args = append(args, "--jobs", strconv.Itoa(opts.Jobs))
+	}
+	if opts.TwoStems != "" {
+		args = append(args, "--two-stems", opts.TwoStems)
 	}
 	args = append(args, src)
 
