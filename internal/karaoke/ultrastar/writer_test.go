@@ -195,7 +195,7 @@ func sampleChart() Chart {
 	notes := seq(4, 50)
 	ph, _ := Arrange(notes, []lyrics.Line{line(0, 350, "één two"), line(350, 2000, "three fôur")})
 	return Chart{
-		Header: Header{Title: "Título", Artist: "Artist", Audio: "a.wav", Vocals: "v.wav", Instrumental: "i.wav", Timing: DefaultTiming()},
+		Header:  Header{Title: "Título", Artist: "Artist", Audio: "a.wav", Vocals: "v.wav", Instrumental: "i.wav", Timing: DefaultTiming()},
 		Phrases: ph,
 	}
 }
