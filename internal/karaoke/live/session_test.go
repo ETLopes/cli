@@ -343,12 +343,7 @@ func TestAProcessingIterationAllocatesNothingOnceWarm(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	withScorer := testing.AllocsPerRun(20, func() { s.iterate(ctx) })
-	// score.Scorer.Push allocates (it lives in another package), so the
-	// claim is about this package's processing: everything but the scorer.
-	s.pipe.noScore = true
 	got := testing.AllocsPerRun(50, func() { s.iterate(ctx) })
-	t.Logf("allocations per iteration: %v without the scorer, %v with it", got, withScorer)
 	if got != 0 {
 		t.Errorf("an iteration allocated %v times, want 0", got)
 	}
