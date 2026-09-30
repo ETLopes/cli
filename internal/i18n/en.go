@@ -162,4 +162,12 @@ var en = map[string]string{
 	"kind.keys":   "Keys",
 	"kind.drums":  "Drums",
 	"kind.line":   "Line",
+
+	// Karaoke song preparation stages, shown while a queued song is prepared.
+	"karaoke.stage.inspect": "Reading video info",
+	"karaoke.stage.download": "Downloading audio",
+	"karaoke.stage.separate": "Isolating the vocals",
+	"karaoke.stage.render": "Rendering backing track",
+	"karaoke.stage.reference": "Tracing the original melody",
+	"karaoke.stage.lyrics": "Fetching lyrics",
 }
