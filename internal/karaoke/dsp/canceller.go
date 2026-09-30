@@ -23,17 +23,16 @@ type CancellerConfig struct {
 
 // Tuning constants; see the Canceller documentation for what each governs.
 const (
-	cancSmooth      = 0.95 // per-block smoothing of the path error powers (about 160 ms)
-	cancCopyRatio   = 0.5  // background/foreground error ratio that triggers a copy ...
-	cancCopyBlocks  = 4    // ... when seen this many blocks in a row
-	cancSlowRatio   = 0.85 // a smaller advantage must persist longer, otherwise a
-	cancSlowBlocks  = 24   // converged foreground never picks up the last few dB
-	cancResetRatio  = 2.0  // background this much worse than foreground is reset
-	cancResetBlocks = 4    // ... when seen this many blocks in a row
-	cancErrSmooth   = 0.5  // per-block smoothing of the per-bin error power
-	cancPsiScale    = 0.3
+	cancSmooth      = 0.95  // per-block smoothing of the path error powers (about 160 ms)
+	cancTestBatch   = 16    // blocks averaged per batch of the path comparison (128 ms)
+	cancTestBatches = 8     // batches in the t-test (about 1 s)
+	cancTestZ       = 3.0   // t statistic the comparison must exceed
+	cancResetRatio  = 2.0   // background this much worse than foreground is reset
+	cancErrSmooth   = 0.5   // per-block smoothing of the per-bin error power
+	cancPsiSmooth   = 0.9   // per-block smoothing of the observation noise
+	cancPsiFloor    = 0.2   // observation noise never falls below this share of the error
 	cancP0          = 1.0   // initial weight uncertainty
-	cancQ           = 2e-2  // per-block process noise, as a fraction of the weight power
+	cancQ           = 2e-3  // per-block process noise, as a fraction of the weight power
 	cancQFloor      = 1e-6  // process noise floor so an empty partition can wake up
 	cancSeedP       = 1e-3  // weight uncertainty of a seeded filter, as a fraction of the weight power
 	cancRegAbs      = 1e-10 // floor of the innovation variance
@@ -103,11 +102,10 @@ type Canceller struct {
 	acc, ef  []complex128
 	see      []float64 // smoothed |E|^2 per bin: the observation noise
 	innov    []float64 // innovation variance per bin
+	psi      []float64 // observation noise per bin
 	pFg, pBg float64   // smoothed error powers of the two paths
 	pMic     float64
-	better   int
-	slow     int
-	worse    int
+	test     pairedTest // background against foreground
 	louder   int
 }
 
@@ -141,7 +139,7 @@ func NewCanceller(cfg CancellerConfig) (*Canceller, error) {
 	}
 	c.frame = make([]float64, fft.Size())
 	c.acc, c.ef = make([]complex128, c.bins), make([]complex128, c.bins)
-	c.see, c.innov = make([]float64, c.bins), make([]float64, c.bins)
+	c.see, c.innov, c.psi = make([]float64, c.bins), make([]float64, c.bins), make([]float64, c.bins)
 	c.Reset()
 	return c, nil
 }
@@ -165,8 +163,10 @@ func (c *Canceller) Reset() {
 		}
 	}
 	clear(c.see)
+	clear(c.psi)
 	c.pFg, c.pBg, c.pMic = 0, 0, 0
-	c.better, c.slow, c.worse, c.louder = 0, 0, 0, 0
+	c.louder = 0
+	c.test = pairedTest{batch: cancTestBatch}
 }
 
 // SeedImpulseResponse loads both filters from a measured impulse response
@@ -283,23 +283,26 @@ func (c *Canceller) arbitrate(micPow, fgPow, bgPow float64) {
 		return
 	}
 
-	ratio := (c.pBg + floor) / (c.pFg + floor)
-	c.better = countIf(ratio < cancCopyRatio, c.better)
-	c.slow = countIf(ratio < cancSlowRatio, c.slow)
-	c.worse = countIf(ratio > cancResetRatio, c.worse)
+	// Paired comparison. The singer is in both errors, so it cancels in the
+	// per-block difference and what is left is the real difference between
+	// the paths; a mean that is not large against its own spread is noise and
+	// must not move weights (a background path that has absorbed a bit of the
+	// singer looks better in total error but is worse at the echo).
+	d := fgPow - bgPow
+	verdict := c.test.update(d)
 	switch {
-	case c.better >= cancCopyBlocks || c.slow >= cancSlowBlocks:
+	case verdict > 0:
 		for i := range c.fg.w {
 			copy(c.fg.w[i], c.bg.w[i])
 		}
 		c.pFg = c.pBg
-		c.better, c.slow = 0, 0
-	case c.worse >= cancResetBlocks:
+		c.test.reset()
+	case verdict < 0 && c.pBg > cancResetRatio*c.pFg:
 		for i := range c.bg.w {
 			copy(c.bg.w[i], c.fg.w[i])
 		}
 		c.pBg = c.pFg
-		c.worse = 0
+		c.test.reset()
 	}
 }
 
@@ -316,17 +319,31 @@ func (c *Canceller) adapt(mic []float32) {
 	c.fft.Forward(c.frame, c.ef)
 
 	// Innovation variance: what the weights' uncertainty predicts for the
-	// error, plus the observation noise.
+	// error, plus the observation noise psi. psi is the smoothed posterior
+	// error, the error that would remain once the update had absorbed the
+	// part the weights can explain (Enzner and Vary), so it is small while the
+	// error is unlearned echo and grows to the whole error when the error is
+	// the singer.
 	for k := range c.innov {
 		e := c.ef[k]
-		c.see[k] = cancErrSmooth*c.see[k] + (1-cancErrSmooth)*(real(e)*real(e)+imag(e)*imag(e))
-		c.innov[k] = cancPsiScale*c.see[k] + cancRegAbs
+		ee := real(e)*real(e) + imag(e)*imag(e)
+		c.see[k] = cancErrSmooth*c.see[k] + (1-cancErrSmooth)*ee
+		if c.psi[k] == 0 {
+			c.psi[k] = ee
+		}
+		c.innov[k] = c.psi[k] + cancRegAbs
 	}
 	for i := 0; i < c.p; i++ {
 		x, u := c.xf[(c.head+i)%c.p], c.unc[i]
 		for k, xv := range x {
 			c.innov[k] += u[k] * (real(xv)*real(xv) + imag(xv)*imag(xv))
 		}
+	}
+	for k := range c.innov {
+		e := c.ef[k]
+		ratio := c.psi[k] / c.innov[k]
+		post := (real(e)*real(e) + imag(e)*imag(e)) * ratio * ratio
+		c.psi[k] = math.Max(cancPsiSmooth*c.psi[k]+(1-cancPsiSmooth)*post, cancPsiFloor*c.see[k])
 	}
 
 	for i := 0; i < c.p; i++ {
@@ -347,9 +364,54 @@ func (c *Canceller) adapt(mic []float32) {
 	}
 }
 
-func countIf(cond bool, n int) int {
-	if cond {
-		return n + 1
+// pairedTest decides whether a stream of paired differences has a mean that
+// is significantly away from zero. The differences are autocorrelated (they
+// come from smoothed powers and from notes that last many blocks), so they are
+// first averaged in batches long enough to be roughly independent and a
+// t-test is run over the last few batch means.
+type pairedTest struct {
+	batch, count int
+	acc          float64
+	means        [cancTestBatches]float64
+	filled, next int
+	verdict      int
+}
+
+func (t *pairedTest) reset() { *t = pairedTest{batch: t.batch} }
+
+// update feeds one difference. It returns +1 if the mean is significantly
+// positive, -1 if significantly negative and 0 otherwise; the answer only
+// changes when a batch completes.
+func (t *pairedTest) update(d float64) int {
+	t.acc += d
+	if t.count++; t.count < t.batch {
+		return t.verdict
 	}
-	return 0
+	t.means[t.next] = t.acc / float64(t.batch)
+	t.next = (t.next + 1) % cancTestBatches
+	t.filled = min(t.filled+1, cancTestBatches)
+	t.acc, t.count = 0, 0
+	t.verdict = 0
+	if t.filled < cancTestBatches {
+		return 0
+	}
+	var mean float64
+	for _, m := range t.means {
+		mean += m
+	}
+	mean /= cancTestBatches
+	var vr float64
+	for _, m := range t.means {
+		vr += (m - mean) * (m - mean)
+	}
+	vr /= cancTestBatches - 1
+	// t = mean / sqrt(vr/n) against z
+	switch {
+	case mean*mean*cancTestBatches <= cancTestZ*cancTestZ*vr:
+	case mean > 0:
+		t.verdict = 1
+	default:
+		t.verdict = -1
+	}
+	return t.verdict
 }
