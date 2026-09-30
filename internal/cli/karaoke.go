@@ -23,12 +23,6 @@ var (
 	karaokeEnsureTools = ensureKaraokeTools
 )
 
-// runKaraokeTUI opens the karaoke screen. The TUI arrives in a later unit; until
-// then it queues the URLs and prepares them the plain way.
-var runKaraokeTUI = func(ctx context.Context, app *karaokeApp, urls []string) error {
-	return runKaraokePlain(ctx, app, ui.Out, urls)
-}
-
 // newKaraokeCmd builds the karaoke tool.
 func newKaraokeCmd(e *env) *cobra.Command {
 	cmd := &cobra.Command{
