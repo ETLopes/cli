@@ -2,6 +2,7 @@ package audio
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -260,5 +261,79 @@ func TestFFmpegErrorNamesTheStep(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "broken.m4a") {
 		t.Errorf("error should name the input file, got: %v", err)
+	}
+}
+
+func TestRenderWAVRequestsTheGivenRateChannelsAndSampleFormat(t *testing.T) {
+	dir := t.TempDir()
+	f := runnertest.New()
+	f.HandleFunc("ffmpeg", nil, func(runner.Spec) runnertest.Response {
+		return runnertest.Response{Do: func(spec runner.Spec) error {
+			return os.WriteFile(spec.Args[len(spec.Args)-1], []byte("RIFF"), 0o644)
+		}}
+	})
+
+	dst := filepath.Join(dir, "sub", "out.wav")
+	spec := WAVSpec{SampleRate: 48000, Channels: 2, Format: SampleFloat32}
+	if err := New(f).RenderWAV(context.Background(), "in.wav", dst, spec, time.Minute, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	c := f.CallsTo("ffmpeg")[0]
+	for flag, want := range map[string]string{"-ar": "48000", "-ac": "2", "-c:a": "pcm_f32le", "-f": "wav"} {
+		if got, ok := c.ArgAfter(flag); !ok || got != want {
+			t.Errorf("%s = %q, want %q", flag, got, want)
+		}
+	}
+	if !c.HasArg("-vn") {
+		t.Error("expected -vn")
+	}
+	if info, err := os.Stat(dst); err != nil || info.Size() == 0 {
+		t.Errorf("destination not written: %v", err)
+	}
+	if _, err := os.Stat(dst + ".part"); !os.IsNotExist(err) {
+		t.Error("the partial file should have been renamed into place")
+	}
+}
+
+func TestRenderWAVUses16BitPCMForSampleInt16(t *testing.T) {
+	f := runnertest.New()
+	f.HandleFunc("ffmpeg", nil, func(runner.Spec) runnertest.Response {
+		return runnertest.Response{Do: func(spec runner.Spec) error {
+			return os.WriteFile(spec.Args[len(spec.Args)-1], []byte("RIFF"), 0o644)
+		}}
+	})
+	dst := filepath.Join(t.TempDir(), "v.wav")
+	if err := New(f).RenderWAV(context.Background(), "in.wav", dst, WAVSpec{SampleRate: 16000, Channels: 1, Format: SampleInt16}, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := f.CallsTo("ffmpeg")[0].ArgAfter("-c:a"); got != "pcm_s16le" {
+		t.Errorf("-c:a = %q", got)
+	}
+}
+
+func TestRenderWAVLeavesNothingBehindWhenFFmpegFails(t *testing.T) {
+	f := runnertest.New()
+	f.Handle("ffmpeg", nil, runnertest.Response{Err: errors.New("boom"), Do: func(spec runner.Spec) error {
+		return os.WriteFile(spec.Args[len(spec.Args)-1], []byte("partial"), 0o644)
+	}})
+	dst := filepath.Join(t.TempDir(), "v.wav")
+	err := New(f).RenderWAV(context.Background(), "in.wav", dst, WAVSpec{SampleRate: 16000, Channels: 1, Format: SampleInt16}, 0, nil)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Error("a failed render must not leave a file at dst")
+	}
+}
+
+func TestRenderWAVRejectsAnUnknownSampleFormat(t *testing.T) {
+	f := runnertest.New()
+	err := New(f).RenderWAV(context.Background(), "in.wav", "out.wav", WAVSpec{SampleRate: 16000, Channels: 1, Format: "bogus"}, 0, nil)
+	if err == nil {
+		t.Error("expected an error")
+	}
+	if len(f.Calls()) != 0 {
+		t.Error("ffmpeg must not run for an invalid spec")
 	}
 }
