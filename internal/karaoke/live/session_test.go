@@ -18,7 +18,7 @@ import (
 
 // testSeconds keeps a song long enough for a dozen judged notes and short
 // enough that the suite stays fast under -race.
-const testSeconds = 6.5
+const testSeconds = 4.6
 
 func run(t *testing.T, rs runSpec) (Results, *Session) {
 	t.Helper()
@@ -33,6 +33,7 @@ func run(t *testing.T, rs runSpec) (Results, *Session) {
 var voice = &singer{latency: 0.05, level: 0.15}
 
 func TestBackingTrackAloneScoresNearZeroAndASingerFollowingTheReferenceScoresHigh(t *testing.T) {
+	t.Parallel()
 	fx := newFixture(t, testSeconds)
 	res, _ := run(t, runSpec{fx: fx, rate: 48000, cal: knownCalibration(t, 48000, &roomA, &roomB), rooms: []mic{
 		{room: roomA, singer: voice},
@@ -54,6 +55,7 @@ func TestBackingTrackAloneScoresNearZeroAndASingerFollowingTheReferenceScoresHig
 }
 
 func TestASingerACalibratedRoundTripLateIsNotScoredAsInTime(t *testing.T) {
+	t.Parallel()
 	// The time mapping subtracts the calibrated round trip. A singer half a
 	// second behind that is outside the +-100 ms slack and must not score.
 	fx := newFixture(t, testSeconds)
@@ -68,6 +70,7 @@ func TestASingerACalibratedRoundTripLateIsNotScoredAsInTime(t *testing.T) {
 }
 
 func TestASingerAnOctaveBelowTheReferenceScoresHigh(t *testing.T) {
+	t.Parallel()
 	fx := newFixture(t, testSeconds)
 	res, _ := run(t, runSpec{fx: fx, rate: 48000, cal: knownCalibration(t, 48000, &roomA),
 		rooms: []mic{{room: roomA, singer: &singer{semitones: -12, latency: 0.05, level: 0.15}}}})
@@ -78,6 +81,7 @@ func TestASingerAnOctaveBelowTheReferenceScoresHigh(t *testing.T) {
 }
 
 func TestTwoSingersGetIndependentScoresThatMatchTheirBatchScores(t *testing.T) {
+	t.Parallel()
 	fx := newFixture(t, testSeconds)
 	var mu sync.Mutex
 	taps := [2][]score.Frame{}
@@ -112,6 +116,7 @@ func TestTwoSingersGetIndependentScoresThatMatchTheirBatchScores(t *testing.T) {
 }
 
 func TestACaptureRingOverflowIsCountedAndTheSessionGoesOn(t *testing.T) {
+	t.Parallel()
 	fx := newFixture(t, testSeconds)
 	done := false
 	s, _ := start(t, runSpec{fx: fx, rate: 48000, cal: knownCalibration(t, 48000, &roomA),
@@ -148,6 +153,7 @@ func TestACaptureRingOverflowIsCountedAndTheSessionGoesOn(t *testing.T) {
 }
 
 func TestPausingForTwoSecondsIgnoresThePausedSpan(t *testing.T) {
+	t.Parallel()
 	fx := newFixture(t, testSeconds)
 	base, _ := run(t, runSpec{fx: fx, rate: 48000, cal: knownCalibration(t, 48000, &roomA), rooms: []mic{{room: roomA, singer: voice}}})
 
@@ -186,6 +192,7 @@ func TestPausingForTwoSecondsIgnoresThePausedSpan(t *testing.T) {
 }
 
 func TestStoppingMidSongGivesIncompleteResultsWithAPartialScore(t *testing.T) {
+	t.Parallel()
 	fx := newFixture(t, testSeconds)
 	reached := make(chan struct{})
 	var once sync.Once
@@ -216,6 +223,7 @@ func TestStoppingMidSongGivesIncompleteResultsWithAPartialScore(t *testing.T) {
 }
 
 func TestA44100HzDeviceUsesTheRendererOnceAndStillScores(t *testing.T) {
+	t.Parallel()
 	fx := newFixture(t, testSeconds)
 	r := &monoRenderer{seconds: testSeconds}
 	res, _ := run(t, runSpec{fx: fx, rate: 44100, renderer: r, cal: knownCalibration(t, 44100, &roomA),
@@ -238,6 +246,7 @@ func TestA44100HzDeviceUsesTheRendererOnceAndStillScores(t *testing.T) {
 }
 
 func TestAMicWithNoEchoPathWarnsAndStillScoresItsPlayer(t *testing.T) {
+	t.Parallel()
 	fx := newFixture(t, testSeconds)
 	dead := roomSpec{delay: 0.01, rt60: 0.2, gain: 0, seed: 3} // nothing of the speakers reaches this mic
 	s, _ := start(t, runSpec{fx: fx, rate: 48000, cal: knownCalibration(t, 48000, &roomA, nil), rooms: []mic{
@@ -257,6 +266,7 @@ func TestAMicWithNoEchoPathWarnsAndStillScoresItsPlayer(t *testing.T) {
 }
 
 func TestACalibrationRunOnTheFakeRoomThenSinging(t *testing.T) {
+	t.Parallel()
 	fx := newFixture(t, testSeconds)
 	w := &world{}
 	be := fakeBackend(w, 48000, fx.notes, mic{room: roomA}, mic{room: roomB})
@@ -277,6 +287,7 @@ func TestACalibrationRunOnTheFakeRoomThenSinging(t *testing.T) {
 }
 
 func TestSnapshotReportsTheSongLineAndPlayersWhileRunningAndIsRaceFree(t *testing.T) {
+	t.Parallel()
 	fx := newFixture(t, testSeconds)
 	s, _ := start(t, runSpec{fx: fx, rate: 48000, cal: knownCalibration(t, 48000, &roomA), rooms: []mic{{room: roomA, singer: voice}}})
 

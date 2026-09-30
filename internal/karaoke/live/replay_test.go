@@ -12,6 +12,7 @@ import (
 )
 
 func TestReplayOfARecordedSessionGivesTheSameScoresAndSensibleMetrics(t *testing.T) {
+	t.Parallel()
 	fx := newFixture(t, testSeconds)
 	dir := filepath.Join(t.TempDir(), "bundle")
 	cal := knownCalibration(t, 48000, &roomA, &roomB)
@@ -83,6 +84,7 @@ func TestReplayOfARecordedSessionGivesTheSameScoresAndSensibleMetrics(t *testing
 }
 
 func TestRecordingThatCannotBeCreatedWarnsAndTheSessionIsUnaffected(t *testing.T) {
+	t.Parallel()
 	fx := newFixture(t, testSeconds)
 	blocker := filepath.Join(t.TempDir(), "file")
 	must(t, os.WriteFile(blocker, nil, 0o644))
@@ -95,6 +97,7 @@ func TestRecordingThatCannotBeCreatedWarnsAndTheSessionIsUnaffected(t *testing.T
 }
 
 func TestADiskErrorWhileRecordingStopsTheRecordingWithoutPanicking(t *testing.T) {
+	t.Parallel()
 	r, err := newRecorder(filepath.Join(t.TempDir(), "b"), 48000, []int{1})
 	must(t, err)
 	x := make([]float32, chunkFrames)
