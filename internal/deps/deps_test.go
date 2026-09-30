@@ -2,6 +2,7 @@ package deps
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,6 +130,83 @@ func TestPresentDenoReportsItsVersion(t *testing.T) {
 	st, _ := NewChecker(f).Check(context.Background()).Lookup("deno")
 	if !st.OK() || st.Version != "2.5.1" {
 		t.Errorf("deno = %+v, want found with version 2.5.1", st)
+	}
+}
+
+// fakeManagedPython creates the interpreter the managed venv would have, under
+// an isolated data dir.
+func fakeManagedPython(t *testing.T) string {
+	t.Helper()
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	python := venvBin("python")
+	if err := os.MkdirAll(filepath.Dir(python), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(python, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return python
+}
+
+func TestSwiftF0StatusReportsTheInstalledVersion(t *testing.T) {
+	python := fakeManagedPython(t)
+	f := runnertest.New()
+	f.Handle("python", []string{"swift-f0"}, runnertest.Response{Stdout: "0.1.2\n"})
+
+	st := NewChecker(f).swiftF0Status(context.Background())
+	if !st.OK() || st.Version != "0.1.2" {
+		t.Errorf("swift-f0 = %+v, want found with version 0.1.2", st)
+	}
+	if st.Path != python {
+		t.Errorf("Path = %q, want the managed interpreter %q", st.Path, python)
+	}
+	if !st.Managed {
+		t.Error("swift-f0 lives in the managed venv, so it must be marked Managed")
+	}
+}
+
+func TestSwiftF0IsNotFoundWhenTheImportFails(t *testing.T) {
+	fakeManagedPython(t)
+	f := runnertest.New()
+	f.Default = &runnertest.Response{Err: errors.New("PackageNotFoundError")}
+
+	if st := NewChecker(f).swiftF0Status(context.Background()); st.OK() {
+		t.Errorf("swift-f0 = %+v, want not found when the probe fails", st)
+	}
+}
+
+func TestSwiftF0IsNotFoundWithoutAManagedEnvironment(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	f := runnertest.New()
+	if st := NewChecker(f).swiftF0Status(context.Background()); st.OK() {
+		t.Errorf("swift-f0 = %+v, want not found with no venv", st)
+	}
+	if n := len(f.Calls()); n != 0 {
+		t.Errorf("%d commands ran, want none when there is no interpreter to ask", n)
+	}
+}
+
+// The dtx report must not gain swift-f0; only the karaoke report asks for it,
+// and it then treats both swift-f0 and deno as required.
+func TestKaraokeReportRequiresWhatKaraokeNeeds(t *testing.T) {
+	fakePath(t)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	c := NewChecker(runnertest.New())
+
+	if _, ok := c.Check(context.Background()).Lookup("swift-f0"); ok {
+		t.Error("swift-f0 must not appear in the dtx report")
+	}
+
+	report := c.CheckKaraoke(context.Background())
+	for _, name := range []string{"swift-f0", "deno", "ffmpeg", "yt-dlp", "demucs"} {
+		st, ok := report.Lookup(name)
+		if !ok || !st.Required {
+			t.Errorf("%s = %+v (found=%v), want it required for karaoke", name, st, ok)
+		}
+	}
+	if report.Ready() {
+		t.Error("karaoke report should not be ready on an empty machine")
 	}
 }
 
