@@ -401,7 +401,7 @@ func residualFloor(t testing.TB, in calibrate.Input, truth []float64) float64 {
 
 // stepHook runs before every pump step with the stream frame reached and
 // returns how many frames to advance (0 means the default step).
-type stepHook func(s *Session, w *world, frame int64) (int, error)
+type stepHook func(ctx context.Context, s *Session, w *world, frame int64) (int, error)
 
 type runSpec struct {
 	fx         fixture
@@ -412,7 +412,9 @@ type runSpec struct {
 	hook       stepHook
 	recordDir  string
 	renderer   Renderer
-	players    []string
+	// tap, if set, sees every frame handed to a scorer, by lane.
+	tap     func(lane int, f score.Frame)
+	players []string
 }
 
 // start builds a session over a fake backend, wired so that hook can steer
@@ -435,7 +437,7 @@ func start(t testing.TB, rs runSpec) (*Session, *world) {
 	pump := func(ctx context.Context, st audioio.Stream, n int) error {
 		if rs.hook != nil {
 			frame := int64(st.Stats().Frames.Load())
-			if k, err := rs.hook(s, w, frame); err != nil {
+			if k, err := rs.hook(ctx, s, w, frame); err != nil {
 				return err
 			} else if k > 0 {
 				n = k
@@ -452,6 +454,7 @@ func start(t testing.TB, rs runSpec) (*Session, *world) {
 	}
 	s, err := newSession(context.Background(), cfg)
 	must(t, err)
+	s.pipe.tap = rs.tap
 	must(t, s.stream.Start())
 	var ctx context.Context
 	ctx, s.cancel = context.WithCancel(context.Background())

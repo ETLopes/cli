@@ -31,6 +31,7 @@ const (
 
 // lane is the processing path of one microphone.
 type lane struct {
+	idx     int
 	name    string
 	channel int
 	noEcho  bool
@@ -80,6 +81,9 @@ type pipeline struct {
 	// noScore skips the scorer, for the allocation test: score.Scorer.Push
 	// allocates and lives outside this package.
 	noScore bool
+	// tap, if set, sees every frame pushed to a scorer. Tests use it to
+	// compare a live run with a batch score of the same frames.
+	tap func(lane int, f score.Frame)
 }
 
 // songData is what a session and a replay load from a song directory.
@@ -109,7 +113,7 @@ func newPipeline(rate int, cal calibrate.Result, specs []laneSpec, data songData
 			return nil, fmt.Errorf("the calibration has no input %d (it has %s)", sp.channel, channelList(cal))
 		}
 		cc := dsp.ChainConfig{Tail: noEchoTail}
-		l := &lane{name: sp.name, channel: sp.channel, noEcho: in.NoEchoPath}
+		l := &lane{idx: len(p.lanes), name: sp.name, channel: sp.channel, noEcho: in.NoEchoPath}
 		if in.NoEchoPath {
 			// The floor of the mic itself: nothing was heard from the speakers.
 			cc.ResidualFloor = math.Pow(10, in.NoiseFloorDBFS/20)
@@ -274,6 +278,9 @@ func (p *pipeline) emit(l *lane, f dsp.Frame) {
 		return
 	}
 	sf.T = time.Duration(song / float64(p.rate) * float64(time.Second))
+	if p.tap != nil {
+		p.tap(l.idx, sf)
+	}
 	l.scorer.Push(sf)
 }
 
