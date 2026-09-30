@@ -121,8 +121,7 @@ func (c *Checker) CheckKaraoke(ctx context.Context) Report {
 }
 
 // swiftF0Status asks the managed interpreter for the installed swift-f0
-// version. Path is the interpreter, since the package has no executable. It is
-// required because it is only queried by CheckKaraoke.
+// version. Path is the interpreter, since the package has no executable.
 func (c *Checker) swiftF0Status(ctx context.Context) Status {
 	s := Status{
 		Name:     swiftF0Package,
