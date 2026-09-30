@@ -23,7 +23,7 @@ type Finisher interface {
 // BufferSource plays a preloaded interleaved stereo buffer. Resampling to the
 // device rate is the caller's job: doing it here would cost time in the callback.
 //
-// Read is called from the audio thread; Pause, Resume, Seek and Position may be
+// Read is called from the audio thread; Pause, Resume, SeekTo and Position may be
 // called from any goroutine.
 type BufferSource struct {
 	samples []float32 // interleaved stereo
@@ -53,7 +53,7 @@ func (s *BufferSource) Read(dst []float32) int {
 		return 0
 	}
 	copy(dst, s.samples[pos*2:(pos+n)*2])
-	// If Seek moved the position while we copied, the seek wins.
+	// If SeekTo moved the position while we copied, the seek wins.
 	s.pos.CompareAndSwap(pos, pos+n)
 	return int(n)
 }
@@ -67,8 +67,8 @@ func (s *BufferSource) Resume() { s.paused.Store(false) }
 // Paused reports whether the source is paused.
 func (s *BufferSource) Paused() bool { return s.paused.Load() }
 
-// Seek moves the playback position to the given frame, clamped to the track.
-func (s *BufferSource) Seek(frame int64) {
+// SeekTo moves the playback position to the given frame, clamped to the track.
+func (s *BufferSource) SeekTo(frame int64) {
 	s.pos.Store(min(max(frame, 0), s.frames))
 }
 
