@@ -176,7 +176,10 @@ func ktype(m karaokeModel, s string) karaokeModel {
 
 // msgOf runs a command and returns what it produced, or nil when it is still
 // waiting after a moment (an event wait, say).
-func msgOf(cmd tea.Cmd) tea.Msg {
+func msgOf(cmd tea.Cmd) tea.Msg { return msgWithin(cmd, 300*time.Millisecond) }
+
+// msgWithin is msgOf with a patience of d, for commands that do real work.
+func msgWithin(cmd tea.Cmd, d time.Duration) tea.Msg {
 	if cmd == nil {
 		return nil
 	}
@@ -185,7 +188,7 @@ func msgOf(cmd tea.Cmd) tea.Msg {
 	select {
 	case msg := <-ch:
 		return msg
-	case <-time.After(300 * time.Millisecond):
+	case <-time.After(d):
 		return nil
 	}
 }

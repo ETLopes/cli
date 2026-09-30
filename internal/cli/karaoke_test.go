@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -77,7 +78,15 @@ func prepRunner() *runnertest.Fake {
 // prepApp is an app whose preparer runs against fakes.
 func prepApp(t *testing.T) (*karaokeApp, *runnertest.Fake) {
 	t.Helper()
-	app, _ := fxApp(t)
+	app, f, _ := prepAppSinging(t)
+	return app, f
+}
+
+// prepAppSinging is prepApp that also returns the switch that makes the fake
+// microphone sing.
+func prepAppSinging(t *testing.T) (*karaokeApp, *runnertest.Fake, *atomic.Bool) {
+	t.Helper()
+	app, singing := fxApp(t)
 	f := prepRunner()
 	app.run = f
 	app.python = "venv-python"
@@ -90,7 +99,7 @@ func prepApp(t *testing.T) (*karaokeApp, *runnertest.Fake) {
 	}))
 	t.Cleanup(srv.Close)
 	app.lyricsURL = srv.URL + "/api"
-	return app, f
+	return app, f, singing
 }
 
 func TestPlainModeQueuesPreparesAndPrintsALinePerStage(t *testing.T) {
