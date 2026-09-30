@@ -17,14 +17,6 @@ func newTestYIN(t testing.TB) *YIN {
 
 func cents(got, want float64) float64 { return 1200 * math.Log2(got/want) }
 
-func f32(x []float64) []float32 {
-	out := make([]float32, len(x))
-	for i, v := range x {
-		out[i] = float32(v)
-	}
-	return out
-}
-
 func TestYINFindsPureTonesFromEightyHertzToAKilohertzWithinFiveCents(t *testing.T) {
 	y := newTestYIN(t)
 	worst := 0.0

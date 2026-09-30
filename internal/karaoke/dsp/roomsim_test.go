@@ -188,33 +188,6 @@ func newRoom(cfg roomConfig) *room {
 // apply convolves x with the room, returning len(x) samples.
 func (r *room) apply(x []float64) []float64 { return fftConvolve(x, r.ir)[:len(x)] }
 
-// fftConvolve is a full linear convolution through one large FFT.
-func fftConvolve(x, h []float64) []float64 {
-	n := 1
-	for n < len(x)+len(h) {
-		n <<= 1
-	}
-	f, _ := NewFFT(n)
-	a, b := make([]complex128, n), make([]complex128, n)
-	for i, v := range x {
-		a[i] = complex(v, 0)
-	}
-	for i, v := range h {
-		b[i] = complex(v, 0)
-	}
-	f.Forward(a)
-	f.Forward(b)
-	for i := range a {
-		a[i] *= b[i]
-	}
-	f.Inverse(a)
-	out := make([]float64, len(x)+len(h)-1)
-	for i := range out {
-		out[i] = real(a[i])
-	}
-	return out
-}
-
 // softClip is the mild loudspeaker nonlinearity: identity for small signals,
 // compressive for peaks. drive of 0 disables it.
 func softClip(x []float64, drive float64) []float64 {
