@@ -155,9 +155,9 @@ func (s Song) Ready() bool {
 	return true
 }
 
-// Lyrics reads the synced lyrics. ok is false when the song has none, which is
+// LoadLyrics reads the synced lyrics. ok is false when the song has none, which is
 // a normal state rather than an error.
-func (s Song) Lyrics() (l lyrics.Lyrics, ok bool, err error) {
+func (s Song) LoadLyrics() (l lyrics.Lyrics, ok bool, err error) {
 	if s.Manifest.Lyrics != LyricsSynced {
 		return lyrics.Lyrics{}, false, nil
 	}
