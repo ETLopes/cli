@@ -100,3 +100,53 @@ func TestOracleFilterCeiling(t *testing.T) {
 		}
 	}
 }
+
+// runCanceller streams ref and mic through c block by block and returns the
+// output and the echo estimate. Trailing samples that do not fill a block stay
+// zero.
+func runCanceller(t testing.TB, c *Canceller, ref, mic []float64, probe ...func(sample int)) (out, est []float64) {
+	t.Helper()
+	out, est = make([]float64, len(mic)), make([]float64, len(mic))
+	r32, m32 := f32(ref), f32(mic)
+	o, e := make([]float32, cancBlock), make([]float32, cancBlock)
+	for i := 0; i+cancBlock <= len(mic); i += cancBlock {
+		c.Process(r32[i:i+cancBlock], m32[i:i+cancBlock], o, e)
+		for j := range o {
+			out[i+j], est[i+j] = float64(o[j]), float64(e[j])
+		}
+		for _, p := range probe {
+			p(i)
+		}
+	}
+	return out, est
+}
+
+func newTestCanceller(t testing.TB) *Canceller {
+	t.Helper()
+	c, err := NewCanceller(CancellerConfig{Tail: cancTail, BulkDelay: cancBulk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func TestCancellerConvergesOnMusicWithNoSinger(t *testing.T) {
+	s := buildScenario(mainScenario(10))
+	c := newTestCanceller(t)
+	out, _ := runCanceller(t, c, s.ref, s.mic, func(i int) {
+		if i%cancRate < cancBlock {
+			t.Logf("  t=%ds pMic %.2e pFg %.2e pBg %.2e", i/cancRate, c.pMic, c.pFg, c.pBg)
+		}
+	})
+	early, late := s.erle(out, 3, 6), s.erle(out, 8, 10)
+	for sec := 0; sec < 10; sec++ {
+		t.Logf("  ERLE second %d: %.1f dB", sec, s.erle(out, float64(sec), float64(sec+1)))
+	}
+	t.Logf("ERLE 3-6 s %.1f dB, 8-10 s %.1f dB", early, late)
+	if early < 20 {
+		t.Errorf("ERLE over 3-6 s %.1f dB, want at least 20", early)
+	}
+	if late < 25 {
+		t.Errorf("ERLE over 8-10 s %.1f dB, want at least 25", late)
+	}
+}
