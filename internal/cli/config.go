@@ -123,6 +123,25 @@ func validateSetting(key, value string) error {
 			return fmt.Errorf("unknown model %q; choose from: %s",
 				value, strings.Join(config.KnownModels, ", "))
 		}
+	case config.KeyKaraokeDifficulty:
+		switch strings.ToLower(value) {
+		case "easy", "medium", "hard":
+		default:
+			return fmt.Errorf("unknown difficulty %q; choose from: easy, medium, hard", value)
+		}
+	case config.KeyKaraokeSlackMS:
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 0 || n > 1000 {
+			return fmt.Errorf("slack must be a number of milliseconds between 0 and 1000, not %q", value)
+		}
+	case config.KeyKaraokeOutputs:
+		outs, err := config.ParseChannels(value)
+		if err != nil {
+			return err
+		}
+		if len(outs) != 2 || outs[0] < 1 || outs[1] < 1 || outs[0] == outs[1] {
+			return fmt.Errorf("outputs must be two different channels counting from 1, e.g. 3,4 (got %q)", value)
+		}
 	case config.KeyReaperPort:
 		n, err := strconv.Atoi(value)
 		if err != nil || n < 1 || n > 65535 {
