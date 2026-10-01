@@ -1,7 +1,7 @@
 ---
 title: "feat: cli karaoke — YouTube karaoke with a persisted queue, echo cancellation and pitch scoring"
 type: feat
-status: active
+status: completed
 date: 2026-09-29
 ---
 
