@@ -338,6 +338,11 @@ func (r *run) lyrics() (outcome, error) {
 	os.Remove(filepath.Join(r.dir, SyncedLyricsName))
 	os.Remove(filepath.Join(r.dir, PlainLyricsName))
 
+	// Re-derived rather than trusted, so a song inspected before the title
+	// cleaning improved searches with the better guess. The stored artist
+	// stands in for the uploader, which is what it came from when the title
+	// had no "Artist - " prefix.
+	r.m.Track, r.m.Artist = lyrics.CleanTitle(r.m.Title, r.m.Artist)
 	found, ok, err := client.Find(r.ctx, r.m.Track, r.m.Artist, r.m.Duration())
 	if err != nil {
 		if ctxErr := r.ctx.Err(); ctxErr != nil {

@@ -82,6 +82,64 @@ func TestFindReturnsTheExactMatchFromGet(t *testing.T) {
 	}
 }
 
+func TestFindSearchesForTimedLyricsWhenTheExactMatchIsPlain(t *testing.T) {
+	f := &fakeLRCLIB{
+		get: func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, map[string]any{"id": 1, "duration": 201, "plainLyrics": "la la la"})
+		},
+		search: func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, []map[string]any{
+				{"id": 2, "duration": 230, "syncedLyrics": "[00:01.00]too long"},
+				{"id": 3, "duration": 199, "syncedLyrics": "[00:01.00]la la la"},
+			})
+		},
+	}
+	c := f.start(t)
+
+	got, ok, err := c.Find(context.Background(), "Placeholder Title", "Placeholder Artist", 200*time.Second)
+	if err != nil || !ok || got.ID != 3 {
+		t.Errorf("got id %d ok=%v err=%v, want the synced candidate 3", got.ID, ok, err)
+	}
+}
+
+func TestFindKeepsAPlainExactMatchWhenNothingTimedIsInTheWindow(t *testing.T) {
+	f := &fakeLRCLIB{
+		get: func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, map[string]any{"id": 1, "duration": 200, "plainLyrics": "la la la"})
+		},
+		search: func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, []map[string]any{
+				{"id": 2, "duration": 230, "syncedLyrics": "[00:01.00]too long"},
+				{"id": 3, "duration": 200, "plainLyrics": "placeholder words"},
+			})
+		},
+	}
+	c := f.start(t)
+
+	got, ok, err := c.Find(context.Background(), "Placeholder Title", "Placeholder Artist", 200*time.Second)
+	if err != nil || !ok || got.ID != 1 {
+		t.Errorf("got id %d ok=%v err=%v, want the exact match 1", got.ID, ok, err)
+	}
+	if paths := f.paths(); len(paths) != 3 {
+		t.Errorf("paths = %v, want get then both searches", paths)
+	}
+}
+
+func TestFindTrustsAnInstrumentalExactMatchWithoutSearching(t *testing.T) {
+	f := &fakeLRCLIB{get: func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"id": 1, "duration": 200, "instrumental": true})
+	}}
+	c := f.start(t)
+
+	got, ok, err := c.Find(context.Background(), "Placeholder Title", "Placeholder Artist", 200*time.Second)
+	if err != nil || !ok || !got.Instrumental {
+		t.Errorf("got %+v ok=%v err=%v", got, ok, err)
+	}
+	if paths := f.paths(); len(paths) != 1 {
+		t.Errorf("paths = %v, want only get", paths)
+	}
+}
+
 func TestFindSendsAnIdentifyingUserAgent(t *testing.T) {
 	var ua string
 	f := &fakeLRCLIB{get: func(w http.ResponseWriter, r *http.Request) {
@@ -236,6 +294,13 @@ func TestCleanTitleDerivesTrackAndArtist(t *testing.T) {
 		{"dashes inside the title survive", "Placeholder Artist - Placeholder - Part Two", "x", "Placeholder - Part Two", "Placeholder Artist"},
 		{"plain title keeps uploader", "Placeholder Title", "Placeholder Artist", "Placeholder Title", "Placeholder Artist"},
 		{"an unrelated parenthesis is kept", "Placeholder Title (Live in Placeholder City)", "Placeholder Artist", "Placeholder Title (Live in Placeholder City)", "Placeholder Artist"},
+		{"portuguese tags as brackets and segments", "Placeholder Artist - Placeholder Title - (COM LETRA NA DESCRIÇÃO) - Legendas - (CC)", "x", "Placeholder Title", "Placeholder Artist"},
+		{"a tag in the middle of the title", "Placeholder Artist - Placeholder Title (Clipe Oficial) [HD]", "x", "Placeholder Title", "Placeholder Artist"},
+		{"a tag segment before the title", "Placeholder Artist - Vídeo Oficial - Placeholder Title", "x", "Placeholder Title", "Placeholder Artist"},
+		{"a pipe separated channel tag", "Placeholder Artist - Placeholder Title | Letra", "x", "Placeholder Title", "Placeholder Artist"},
+		{"a hyphen inside a name is not a separator", "Placeholder-Artist - Placeholder Title", "x", "Placeholder Title", "Placeholder-Artist"},
+		{"a title made of filler words is kept", "Placeholder Artist - No", "x", "No", "Placeholder Artist"},
+		{"a title that is only tags keeps the uploader", "Official Video", "Placeholder Artist", "Official Video", "Placeholder Artist"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
