@@ -603,3 +603,34 @@ func TestPreparedSongLoadsIdenticallyFromDisk(t *testing.T) {
 		}
 	}
 }
+
+func TestTheLyricsStageSearchesWithTheTitleCleanedAgain(t *testing.T) {
+	h := newHarness(t)
+	h.mustPrepare()
+
+	// A song inspected by an older build kept an upload tag in its track.
+	m, err := readManifest(h.songDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Track = "Placeholder Title - (COM LETRA NA DESCRIÇÃO) - Legendas - (CC)"
+	delete(m.Stages, StageLyrics)
+	if err := writeManifest(h.songDir(), m); err != nil {
+		t.Fatal(err)
+	}
+
+	var asked []string
+	h.lrclibGet = func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.URL.Query().Get("track_name")+" / "+r.URL.Query().Get("artist_name"))
+		fmt.Fprintf(w, `{"id":1,"duration":200,"instrumental":false,"syncedLyrics":%q}`, syncedLRC)
+	}
+	h.reset()
+	s := h.mustPrepare()
+
+	if want := []string{"Placeholder Title / Placeholder Artist"}; !reflect.DeepEqual(asked, want) {
+		t.Errorf("searched for %q, want %q", asked, want)
+	}
+	if s.Track != "Placeholder Title" || s.Lyrics != LyricsSynced {
+		t.Errorf("Track=%q Lyrics=%q", s.Track, s.Lyrics)
+	}
+}
