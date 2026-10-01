@@ -113,7 +113,7 @@ func runKaraokeReplay(ctx context.Context, app *karaokeApp, w io.Writer, bundleD
 
 	fmt.Fprintln(w, ui.Heading.Render(i18n.T("karaoke.replay.scores")))
 	for _, p := range res.Players {
-		fmt.Fprintln(w, "  "+ui.Success(i18n.Tf("karaoke.replay.player", p.Name, p.Channel, p.Score, p.InTunePercent)))
+		fmt.Fprintln(w, "  "+ui.Success(i18n.Tf("karaoke.replay.player", p.Name, p.Channel, points100(p.Score), p.InTunePercent)))
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, ui.Heading.Render(i18n.T("karaoke.replay.metrics")))

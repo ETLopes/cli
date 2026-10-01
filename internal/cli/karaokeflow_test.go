@@ -94,6 +94,7 @@ func TestAddPrepareSingAndResultsThroughTheRealParts(t *testing.T) {
 	if sc.Players[1].Score > 400 {
 		t.Errorf("the echo-only input scored %d, want near zero", sc.Players[1].Score)
 	}
+	m = kpress(m, "enter") // skip the reveal
 	if out := kscreen(m); !strings.Contains(out, "Ana ★") || !strings.Contains(out, "Winner: Ana") {
 		t.Errorf("results should crown Ana:\n%s", out)
 	}

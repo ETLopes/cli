@@ -108,7 +108,7 @@ func TestFailedAndSungRowsShowTheirOutcome(t *testing.T) {
 	fxMust(t, store.SetState(sung.ID, queue.Sung))
 
 	out := kscreen(m)
-	for _, want := range []string{"✗", "download blew up", "★", "Ana 8123"} {
+	for _, want := range []string{"✗", "download blew up", "★", "Ana 81"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("screen lacks %q:\n%s", want, out)
 		}

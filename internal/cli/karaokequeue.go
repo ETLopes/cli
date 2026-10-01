@@ -401,7 +401,7 @@ func (m karaokeModel) rowView(e queue.Entry, selected bool) string {
 		last := e.Scores[n-1]
 		parts := make([]string, len(last.Players))
 		for i, p := range last.Players {
-			parts[i] = fmt.Sprintf("%s %d", p.Name, p.Score)
+			parts[i] = fmt.Sprintf("%s %d", p.Name, points100(p.Score))
 		}
 		detail = ui.OK.Render(strings.Join(parts, " · "))
 	}

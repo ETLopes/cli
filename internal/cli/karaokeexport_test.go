@@ -87,7 +87,7 @@ func TestReplayPrintsScoresAndPerMicMetricsForARecordedSession(t *testing.T) {
 	var out bytes.Buffer
 	fxMust(t, runKaraokeReplay(ctx, app, &out, bundles[0]))
 	text := plain(out.String())
-	for _, want := range []string{"Ana (input 1):", "Bruno (input 2): 0 points", "voiced", "echo reduction"} {
+	for _, want := range []string{"Ana (input 1):", "Bruno (input 2): 0/100", "voiced", "echo reduction"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("replay output lacks %q:\n%s", want, text)
 		}

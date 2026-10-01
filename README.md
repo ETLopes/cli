@@ -304,12 +304,19 @@ and they are prepared one at a time while you sing.
 | `?` | help |
 | `q` or `ctrl+c` | quit; the queue is saved as you go |
 
-While singing, `space` pauses and `esc` stops early. Each player has a pitch
-lane: a band for the original pitch and a marker for yours, green on a hit and
-red on a miss, folded by octaves so a singer an octave away still counts. When
-the song ends, the results show each player's score, how much of the singing was
-in tune, the mean error in cents, whether they drift sharp or flat, their
-longest streak and their best and worst lines. The score is kept on the song.
+While singing, `space` pauses and `esc` stops early. The lyrics are drawn in
+block letters as large as the terminal allows, the line being sung filling in as
+it goes and the next one smaller underneath, so a bigger window or a smaller
+terminal font makes them bigger. Each player has a pitch lane: a band for the
+original pitch and a marker for yours, green on a hit and red on a miss, folded
+by octaves so a singer an octave away still counts.
+
+The score stays hidden until the song ends. It is out of 100, where 100 is the
+most a song can give, and it is revealed one player at a time, lowest first,
+counting up to the score before a verdict; `enter` shows it all at once. The
+results then show how much of the singing was in tune, the mean error in cents,
+whether each player drifts sharp or flat, their longest streak and their best
+and worst lines. The score is kept on the song.
 
 Without a terminal, or with `--plain`, the URLs are queued and prepared in the
 foreground, one line per stage.
