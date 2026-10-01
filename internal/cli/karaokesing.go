@@ -195,7 +195,7 @@ func (m karaokeModel) sessionDone(msg sessionDoneMsg) (tea.Model, tea.Cmd) {
 	m.results = resultsState{entry: msg.entry, res: msg.res, lines: lines}
 	m.results.saveErr = m.recordScore(msg.entry, msg.res)
 	m.screen = screenResults
-	return m, nil
+	return m, m.startReveal()
 }
 
 // laneFold is the sung pitch's offset from the target in semitones, folded by
@@ -234,6 +234,13 @@ func pitchLane(p live.PlayerSnapshot) string {
 	return strings.Join(cells, "")
 }
 
+// singChromeRows is what the sing view needs besides the lyrics: the banner,
+// the title, the progress bar, the gaps, the key hint and a warning line.
+const singChromeRows = 13
+
+// singDefaultHeight stands in for the terminal's height until it is known.
+const singDefaultHeight = 30
+
 func (m karaokeModel) singView() string {
 	s := m.sing
 	var b strings.Builder
@@ -256,18 +263,34 @@ func (m karaokeModel) singView() string {
 	}
 	b.WriteString("\n\n")
 
+	// The lyrics take whatever the rest leaves: three fifths for the line
+	// being sung, the rest for the one after it, drawn smaller and dimmed.
+	height := m.height
+	if height <= 0 {
+		height = singDefaultHeight
+	}
+	area := max(0, height-singChromeRows-len(snap.Players))
+	curRows := area * 3 / 5
+	cols := m.width - 4
 	cur, next := m.lyricLines(snap)
-	b.WriteString("  " + cur + "\n  " + ui.Muted.Render(next) + "\n\n")
+	for _, l := range bigLines(cur.text, cols, curRows, cur.progress, ui.Accent.Bold(true), ui.Heading) {
+		b.WriteString("  " + l + "\n")
+	}
+	b.WriteString("\n")
+	for _, l := range bigLines(next, cols, area-curRows-1, 0, ui.Muted, ui.Muted) {
+		b.WriteString("  " + l + "\n")
+	}
+	b.WriteString("\n")
 
+	// No score while singing: it is revealed at the end. The lane still shows
+	// where each voice is against the melody.
 	nameW := 0
 	for _, p := range snap.Players {
 		nameW = max(nameW, len([]rune(p.Name)))
 	}
 	for _, p := range snap.Players {
-		b.WriteString(fmt.Sprintf("  %s %s %s %s  %s\n",
+		b.WriteString(fmt.Sprintf("  %s  %s  %s\n",
 			ui.Heading.Render(ui.Pad(p.Name, nameW)),
-			ui.OK.Bold(true).Render(fmt.Sprintf("%5d", p.Score)),
-			ui.Muted.Render(ui.Pad(i18n.Tf("karaoke.tui.streak", fmt.Sprintf("%.1fs", p.Streak.Seconds())), 14)),
 			pitchLane(p),
 			meterBar(daw.Meter{Peak: p.LevelDBFS}, levelWidth)))
 	}
@@ -283,19 +306,27 @@ func (m karaokeModel) singView() string {
 	return b.String()
 }
 
-// lyricLines returns the current line, with the sung part highlighted, and the
-// one after it. Before the first line the current one is empty and the next is
-// the upcoming line.
-func (m karaokeModel) lyricLines(snap live.Snapshot) (cur, next string) {
+// lyricSlot is the line in the big slot and how much of it has been sung.
+type lyricSlot struct {
+	text     string
+	progress float64
+}
+
+// lyricLines returns the line for the big slot and the one after it. Before a
+// line starts, including the first, the big slot already shows it unsung, so
+// it can be read ahead and does not jump when the singing begins.
+func (m karaokeModel) lyricLines(snap live.Snapshot) (cur lyricSlot, next string) {
 	lines := m.sing.lines
 	from := 0
-	if i := snap.LineIndex; i >= 0 && i < len(lines) {
-		r := []rune(lines[i].Text)
-		n := min(max(int(snap.LineProgress*float64(len(r))+0.5), 0), len(r))
-		cur = ui.Accent.Bold(true).Render(string(r[:n])) + ui.Heading.Render(string(r[n:]))
+	if i := snap.LineIndex; i >= 0 && i < len(lines) && !lines[i].Blank() {
+		cur = lyricSlot{text: lines[i].Text, progress: min(max(snap.LineProgress, 0), 1)}
 		from = i + 1
 	} else {
-		for from < len(lines) && lines[from].Start <= snap.Position {
+		for from < len(lines) && (lines[from].Start <= snap.Position || lines[from].Blank()) {
+			from++
+		}
+		if from < len(lines) {
+			cur = lyricSlot{text: lines[from].Text}
 			from++
 		}
 	}

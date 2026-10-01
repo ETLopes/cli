@@ -155,6 +155,7 @@ type karaokeModel struct {
 	now    func() time.Time
 
 	width       int
+	height      int
 	screen      karaokeScreen
 	showHelp    bool
 	quitting    bool
@@ -262,7 +263,7 @@ func (m karaokeModel) loadCalibration() tea.Cmd {
 func (m karaokeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = max(msg.Width, 40)
+		m.width, m.height = max(msg.Width, 40), msg.Height
 		return m, nil
 	case tickMsg:
 		m.spin++
@@ -296,6 +297,8 @@ func (m karaokeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.singTick(msg)
 	case sessionDoneMsg:
 		return m.sessionDone(msg)
+	case revealTickMsg:
+		return m.revealTick()
 	case tea.PasteMsg:
 		if m.screen == screenQueue {
 			return m.paste(msg.Content)
@@ -318,10 +321,7 @@ func (m karaokeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case screenSing:
 			return m.singKey(msg)
 		case screenResults:
-			if msg.String() == "enter" || msg.String() == "esc" || msg.String() == "q" {
-				m.screen = screenQueue
-			}
-			return m, nil
+			return m.resultsKey(msg)
 		}
 	}
 	// Anything else (cursor blinks, for one) belongs to the input.

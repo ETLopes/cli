@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/ETLopes/cli/internal/karaoke/live"
 	"github.com/ETLopes/cli/internal/karaoke/lyrics"
 	"github.com/ETLopes/cli/internal/karaoke/queue"
@@ -144,17 +146,18 @@ func singing(t *testing.T, cfgMut func(*karaokeModel)) (karaokeModel, *fakeSessi
 	return m, sess, w, store, e
 }
 
-func TestTheSingViewShowsTitleProgressLyricsAndPlayers(t *testing.T) {
+func TestTheSingViewShowsTitleProgressPlayersAndNoScore(t *testing.T) {
 	m, _, _, _, _ := singing(t, nil)
 	out := kscreen(m)
-	for _, want := range []string{
-		"Alpha Placeholder", "0:12", "3:20",
-		"alpha bravo charlie", "delta echo foxtrot", // the current line, then the next non-blank one
-		"Ana", "1234", "streak 1.5s", "Bruno", "56",
-		laneExpect(laneCentre),
-	} {
+	for _, want := range []string{"Alpha Placeholder", "0:12", "3:20", "Ana", "Bruno", laneExpect(laneCentre)} {
 		if !strings.Contains(out, want) {
 			t.Errorf("sing view lacks %q:\n%s", want, out)
+		}
+	}
+	// The score is a surprise for the end.
+	for _, hidden := range []string{"1234", "56", "streak"} {
+		if strings.Contains(out, hidden) {
+			t.Errorf("sing view shows %q while singing:\n%s", hidden, out)
 		}
 	}
 	if strings.Count(out, "●") != 1 {
@@ -162,23 +165,56 @@ func TestTheSingViewShowsTitleProgressLyricsAndPlayers(t *testing.T) {
 	}
 }
 
-func TestTheLyricHighlightFollowsTheLineProgress(t *testing.T) {
+// bigRowsIn counts the screen rows drawn with block characters.
+func bigRowsIn(out string) int {
+	n := 0
+	for _, l := range strings.Split(out, "\n") {
+		if strings.ContainsAny(l, "▘▝▀▖▌▞▛▗▚▐▜▄▙▟█") {
+			n++
+		}
+	}
+	return n
+}
+
+func TestTheLyricsAreDrawnBigAndGrowWithTheTerminal(t *testing.T) {
 	m, _, _, _, _ := singing(t, nil)
-	cur, _ := m.lyricLines(m.sing.snap)
-	// "alpha bravo charlie" is 19 runes; half of it, rounded, is 10.
-	want := ui.Accent.Bold(true).Render("alpha brav") + ui.Heading.Render("o charlie")
-	if cur != want {
-		t.Errorf("highlight = %q, want %q", cur, want)
+	m = ksend(m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	small := bigRowsIn(kscreen(m))
+	m = ksend(m, tea.WindowSizeMsg{Width: 200, Height: 60})
+	large := bigRowsIn(kscreen(m))
+	if small < 2*bigMinRows {
+		t.Errorf("a 100×30 terminal draws %d big rows, want both lines big", small)
+	}
+	if large <= small {
+		t.Errorf("a larger terminal draws %d big rows, want more than %d", large, small)
 	}
 }
 
-func TestBeforeTheFirstLineTheNextOneIsShown(t *testing.T) {
+func TestTheBigSlotHoldsTheLineBeingSungAndHowFarItIs(t *testing.T) {
+	m, _, _, _, _ := singing(t, nil)
+	cur, next := m.lyricLines(m.sing.snap)
+	if cur != (lyricSlot{text: "alpha bravo charlie", progress: 0.5}) || next != "delta echo foxtrot" {
+		t.Errorf("cur=%+v next=%q", cur, next)
+	}
+}
+
+func TestBeforeALineStartsItWaitsInTheBigSlotUnsung(t *testing.T) {
 	m, sess, _, _, _ := singing(t, nil)
 	sess.snap.LineIndex, sess.snap.Position = -1, 2*time.Second
 	m.sing.snap = sess.Snapshot()
 	cur, next := m.lyricLines(m.sing.snap)
-	if cur != "" || next != "alpha bravo charlie" {
-		t.Errorf("cur=%q next=%q", cur, next)
+	if cur != (lyricSlot{text: "alpha bravo charlie"}) || next != "delta echo foxtrot" {
+		t.Errorf("cur=%+v next=%q", cur, next)
+	}
+}
+
+func TestDuringAGapTheLineAfterItWaitsInTheBigSlot(t *testing.T) {
+	m, sess, _, _, _ := singing(t, nil)
+	sess.snap.LineIndex, sess.snap.Position = 1, 16*time.Second
+	m.sing.snap = sess.Snapshot()
+	cur, next := m.lyricLines(m.sing.snap)
+	if cur != (lyricSlot{text: "delta echo foxtrot"}) || next != "" {
+		t.Errorf("cur=%+v next=%q", cur, next)
 	}
 }
 
